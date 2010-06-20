@@ -94,8 +94,10 @@ int rt2x00pci_probe(struct pci_dev *pci_dev, const struct rt2x00_ops *ops)
 
 	pci_set_master(pci_dev);
 
+#ifdef CONFIG_PCI_SET_MWI
 	if (pci_set_mwi(pci_dev))
 		rt2x00_probe_err("MWI not available\n");
+#endif
 
 	if (dma_set_mask(&pci_dev->dev, DMA_BIT_MASK(32))) {
 		rt2x00_probe_err("PCI DMA not supported\n");
