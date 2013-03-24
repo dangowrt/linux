@@ -995,6 +995,11 @@ struct rt2x00_dev {
 	int rf_channel;
 
 	/*
+	 * Counter for tx status irq retries (rt2800pci).
+	 */
+	unsigned int txstatus_irq_retries;
+
+	/*
 	 * Protect the interrupt mask register.
 	 */
 	spinlock_t irqmask_lock;
