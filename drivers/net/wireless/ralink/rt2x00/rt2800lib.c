@@ -4647,7 +4647,8 @@ static void rt2800_config_txpower(struct rt2x00_dev *rt2x00dev,
 				  struct ieee80211_channel *chan,
 				  int power_level)
 {
-	if (rt2x00_rt(rt2x00dev, RT3593))
+	if (rt2x00_rt(rt2x00dev, RT3593) ||
+	    rt2x00_rt(rt2x00dev, RT3883))
 		rt2800_config_txpower_rt3593(rt2x00dev, chan, power_level);
 	else
 		rt2800_config_txpower_rt28xx(rt2x00dev, chan, power_level);
