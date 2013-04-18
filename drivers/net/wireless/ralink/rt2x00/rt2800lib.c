@@ -558,6 +558,7 @@ void rt2800_get_txwi_rxwi_size(struct rt2x00_dev *rt2x00dev,
 {
 	switch (rt2x00dev->chip.rt) {
 	case RT3593:
+	case RT3883:
 		*txwi_size = TXWI_DESC_SIZE_4WORDS;
 		*rxwi_size = RXWI_DESC_SIZE_5WORDS;
 		break;
