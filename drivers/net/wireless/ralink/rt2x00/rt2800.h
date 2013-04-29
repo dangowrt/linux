@@ -1588,6 +1588,20 @@
 #define TX_PWR_CFG_9_STBC7_CH2		FIELD32(0x00000f00)
 
 /*
+ * TX_TXBF_CFG:
+ */
+#define TX_TXBF_CFG_0			0x138c
+#define TX_TXBF_CFG_1			0x13a4
+#define TX_TXBF_CFG_2			0x13a8
+#define TX_TXBF_CFG_3			0x13ac
+
+/*
+ * TX_FBK_CFG_3S:
+ */
+#define TX_FBK_CFG_3S_0			0x13c4
+#define TX_FBK_CFG_3S_1			0x13c8
+
+/*
  * RX_FILTER_CFG: RX configuration register.
  */
 #define RX_FILTER_CFG			0x1400
@@ -2157,6 +2171,7 @@ struct mac_iveiv_entry {
 /*
  * RFCSR 2:
  */
+#define RFCSR2_RESCAL_BP		FIELD8(0x40)
 #define RFCSR2_RESCAL_EN		FIELD8(0x80)
 
 /*
