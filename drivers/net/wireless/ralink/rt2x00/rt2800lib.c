@@ -342,7 +342,8 @@ static unsigned int rt2800_eeprom_word_index(struct rt2x00_dev *rt2x00dev,
 		      wiphy_name(rt2x00dev->hw->wiphy), word))
 		return 0;
 
-	if (rt2x00_rt(rt2x00dev, RT3593))
+	if (rt2x00_rt(rt2x00dev, RT3593) ||
+	    rt2x00_rt(rt2x00dev, RT3883))
 		map = rt2800_eeprom_map_ext;
 	else
 		map = rt2800_eeprom_map;
