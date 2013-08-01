@@ -4414,6 +4414,7 @@ void rt2800_vco_calibration(struct rt2x00_dev *rt2x00dev)
 	case RF3053:
 	case RF3070:
 	case RF3290:
+	case RF3853:
 	case RF5360:
 	case RF5362:
 	case RF5370:
@@ -7894,6 +7895,7 @@ static int rt2800_probe_hw_mode(struct rt2x00_dev *rt2x00dev)
 	case RF3053:
 	case RF3070:
 	case RF3290:
+	case RF3853:
 	case RF5360:
 	case RF5362:
 	case RF5370:
