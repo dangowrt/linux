@@ -5025,7 +5025,7 @@ static int rt2800_init_registers(struct rt2x00_dev *rt2x00dev)
 	/*
 	 * Clear all beacons
 	 */
-	for (i = 0; i < 8; i++)
+	for (i = 0; i < drv_data->hw_beacon_count; i++)
 		rt2800_clear_beacon_register(rt2x00dev, i);
 
 	if (rt2x00_is_usb(rt2x00dev)) {
@@ -7874,6 +7874,8 @@ int rt2800_probe_hw(struct rt2x00_dev *rt2x00dev)
 
 	if (rt2x00_rt(rt2x00dev, RT3593))
 		__set_bit(RT2800_HAS_HIGH_SHARED_MEM, &drv_data->rt2800_flags);
+
+	drv_data->hw_beacon_count = 8;
 
 	/*
 	 * Allocate eeprom data.
