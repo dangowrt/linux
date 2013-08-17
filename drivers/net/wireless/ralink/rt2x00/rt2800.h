@@ -574,6 +574,7 @@
 #define PBF_SYS_CTRL			0x0400
 #define PBF_SYS_CTRL_READY		FIELD32(0x00000080)
 #define PBF_SYS_CTRL_HOST_RAM_WRITE	FIELD32(0x00010000)
+#define PBF_SYS_CTRL_SHR_MSEL		FIELD32(0x00080000)
 
 /*
  * HOST-MCU shared memory
@@ -2025,6 +2026,8 @@ struct mac_iveiv_entry {
 	(((__index) < 4) ? (HW_BEACON_BASE0 + (__index * 0x0200)) : \
 	  (((__index) < 6) ? (HW_BEACON_BASE4 + ((__index - 4) * 0x0200)) : \
 	  (HW_BEACON_BASE6 - ((__index - 6) * 0x0200))))
+
+#define HW_BEACON_BASE_HIGH(__index)	(0x4000 + (__index) * 512)
 
 #define BEACON_BASE_TO_OFFSET(_base)	(((_base) - 0x4000) / 64)
 

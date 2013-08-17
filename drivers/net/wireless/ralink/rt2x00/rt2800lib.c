@@ -82,6 +82,39 @@ static inline bool rt2800_is_305x_soc(struct rt2x00_dev *rt2x00dev)
 	return false;
 }
 
+static inline void rt2800_shared_mem_select(struct rt2x00_dev *rt2x00dev,
+					    bool high)
+{
+	u32 reg;
+
+	if (WARN_ON_ONCE(!rt2800_has_high_shared_mem(rt2x00dev)))
+		return;
+
+	rt2800_register_read(rt2x00dev, PBF_SYS_CTRL, &reg);
+	rt2x00_set_field32(&reg, PBF_SYS_CTRL_SHR_MSEL, high);
+	rt2800_register_write(rt2x00dev, PBF_SYS_CTRL, reg);
+}
+
+static inline bool rt2800_beacon_uses_high_mem(struct rt2x00_dev *rt2x00dev)
+{
+	if (rt2x00_rt(rt2x00dev, RT3593))
+		return true;
+
+	return false;
+}
+
+static inline void rt2800_select_beacon_mem(struct rt2x00_dev *rt2x00dev)
+{
+	if (rt2800_beacon_uses_high_mem(rt2x00dev))
+		rt2800_shared_mem_select(rt2x00dev, true);
+}
+
+static inline void rt2800_deselect_beacon_mem(struct rt2x00_dev *rt2x00dev)
+{
+	if (rt2800_beacon_uses_high_mem(rt2x00dev))
+		rt2800_shared_mem_select(rt2x00dev, false);
+}
+
 static void rt2800_bbp_write(struct rt2x00_dev *rt2x00dev,
 			     const unsigned int word, const u8 value)
 {
@@ -948,6 +981,9 @@ EXPORT_SYMBOL_GPL(rt2800_txdone_entry);
 static unsigned int rt2800_hw_beacon_base(struct rt2x00_dev *rt2x00dev,
 					  unsigned int index)
 {
+	if (rt2x00_rt(rt2x00dev, RT3593))
+		return HW_BEACON_BASE_HIGH(index);
+
 	return HW_BEACON_BASE(index);
 }
 
@@ -1046,8 +1082,12 @@ void rt2800_write_beacon(struct queue_entry *entry, struct txentry_desc *txdesc)
 	beacon_base = rt2800_hw_beacon_base(rt2x00dev, entry->entry_idx);
 
 	rt2800_shared_mem_lock(rt2x00dev);
+
+	rt2800_select_beacon_mem(rt2x00dev);
 	rt2800_register_multiwrite(rt2x00dev, beacon_base, entry->skb->data,
 				   entry->skb->len + padding_len);
+	rt2800_deselect_beacon_mem(rt2x00dev);
+
 	rt2800_shared_mem_unlock(rt2x00dev);
 	__set_bit(ENTRY_BCN_ENABLED, &entry->flags);
 
@@ -1080,6 +1120,8 @@ static inline void rt2800_clear_beacon_register(struct rt2x00_dev *rt2x00dev,
 
 	rt2800_shared_mem_lock(rt2x00dev);
 
+	rt2800_select_beacon_mem(rt2x00dev);
+
 	/*
 	 * For the Beacon base registers we only need to clear
 	 * the whole TXWI which (when set to 0) will invalidate
@@ -1087,6 +1129,8 @@ static inline void rt2800_clear_beacon_register(struct rt2x00_dev *rt2x00dev,
 	 */
 	for (i = 0; i < txwi_desc_size; i += sizeof(__le32))
 		rt2800_register_write(rt2x00dev, beacon_base + i, 0);
+
+	rt2800_deselect_beacon_mem(rt2x00dev);
 
 	rt2800_shared_mem_unlock(rt2x00dev);
 }
