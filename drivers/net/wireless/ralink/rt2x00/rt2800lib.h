@@ -20,6 +20,23 @@
 #ifndef RT2800LIB_H
 #define RT2800LIB_H
 
+#include "rt2800.h"
+
+/* RT2800 driver data structure */
+struct rt2800_drv_data {
+	u8 calibration_bw20;
+	u8 calibration_bw40;
+	u8 bbp25;
+	u8 bbp26;
+	u8 txmixer_gain_24g;
+	u8 txmixer_gain_5g;
+	u8 max_psdu;
+	unsigned int tbtt_tick;
+	unsigned int ampdu_factor_cnt[4];
+	DECLARE_BITMAP(sta_ids, STA_IDS_SIZE);
+};
+
+
 struct rt2800_ops {
 	void (*register_read)(struct rt2x00_dev *rt2x00dev,
 			      const unsigned int offset, u32 *value);
