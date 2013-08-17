@@ -176,6 +176,9 @@ static const struct rt2800_ops rt2800soc_rt2800_ops = {
 	.drv_write_firmware	= rt2800soc_write_firmware,
 	.drv_init_registers	= rt2800mmio_init_registers,
 	.drv_get_txwi		= rt2800mmio_get_txwi,
+	.shmem_init_lock	= rt2800mmio_shmem_init_lock,
+	.shmem_lock		= rt2800mmio_shmem_lock,
+	.shmem_unlock		= rt2800mmio_shmem_unlock,
 };
 
 static const struct rt2x00lib_ops rt2800soc_rt2x00_ops = {

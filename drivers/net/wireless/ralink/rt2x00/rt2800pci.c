@@ -69,7 +69,9 @@ static void rt2800pci_mcu_status(struct rt2x00_dev *rt2x00dev, const u8 token)
 		return;
 
 	for (i = 0; i < 200; i++) {
+		rt2800_shared_mem_lock(rt2x00dev);
 		rt2x00mmio_register_read(rt2x00dev, H2M_MAILBOX_CID, &reg);
+		rt2800_shared_mem_unlock(rt2x00dev);
 
 		if ((rt2x00_get_field32(reg, H2M_MAILBOX_CID_CMD0) == token) ||
 		    (rt2x00_get_field32(reg, H2M_MAILBOX_CID_CMD1) == token) ||
@@ -83,8 +85,10 @@ static void rt2800pci_mcu_status(struct rt2x00_dev *rt2x00dev, const u8 token)
 	if (i == 200)
 		rt2x00_err(rt2x00dev, "MCU request failed, no response from hardware\n");
 
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2x00mmio_register_write(rt2x00dev, H2M_MAILBOX_STATUS, ~0);
 	rt2x00mmio_register_write(rt2x00dev, H2M_MAILBOX_CID, ~0);
+	rt2800_shared_mem_unlock(rt2x00dev);
 }
 
 static void rt2800pci_eepromregister_read(struct eeprom_93cx6 *eeprom)
@@ -184,6 +188,8 @@ static int rt2800pci_write_firmware(struct rt2x00_dev *rt2x00dev,
 	 */
 	reg = 0;
 	rt2x00_set_field32(&reg, PBF_SYS_CTRL_HOST_RAM_WRITE, 1);
+
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2x00mmio_register_write(rt2x00dev, PBF_SYS_CTRL, reg);
 
 	/*
@@ -197,6 +203,7 @@ static int rt2800pci_write_firmware(struct rt2x00_dev *rt2x00dev,
 
 	rt2x00mmio_register_write(rt2x00dev, H2M_BBP_AGENT, 0);
 	rt2x00mmio_register_write(rt2x00dev, H2M_MAILBOX_CSR, 0);
+	rt2800_shared_mem_unlock(rt2x00dev);
 
 	return 0;
 }
@@ -213,8 +220,10 @@ static int rt2800pci_enable_radio(struct rt2x00_dev *rt2x00dev)
 		return retval;
 
 	/* After resume MCU_BOOT_SIGNAL will trash these. */
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2x00mmio_register_write(rt2x00dev, H2M_MAILBOX_STATUS, ~0);
 	rt2x00mmio_register_write(rt2x00dev, H2M_MAILBOX_CID, ~0);
+	rt2800_shared_mem_unlock(rt2x00dev);
 
 	rt2800_mcu_request(rt2x00dev, MCU_SLEEP, TOKEN_RADIO_OFF, 0xff, 0x02);
 	rt2800pci_mcu_status(rt2x00dev, TOKEN_RADIO_OFF);
@@ -233,10 +242,12 @@ static int rt2800pci_set_state(struct rt2x00_dev *rt2x00dev,
 				   0, 0x02);
 		rt2800pci_mcu_status(rt2x00dev, TOKEN_WAKEUP);
 	} else if (state == STATE_SLEEP) {
+		rt2800_shared_mem_lock(rt2x00dev);
 		rt2x00mmio_register_write(rt2x00dev, H2M_MAILBOX_STATUS,
 					  0xffffffff);
 		rt2x00mmio_register_write(rt2x00dev, H2M_MAILBOX_CID,
 					  0xffffffff);
+		rt2800_shared_mem_unlock(rt2x00dev);
 		rt2800_mcu_request(rt2x00dev, MCU_SLEEP, TOKEN_SLEEP,
 				   0xff, 0x01);
 	}
@@ -337,6 +348,9 @@ static const struct rt2800_ops rt2800pci_rt2800_ops = {
 	.drv_write_firmware	= rt2800pci_write_firmware,
 	.drv_init_registers	= rt2800mmio_init_registers,
 	.drv_get_txwi		= rt2800mmio_get_txwi,
+	.shmem_init_lock	= rt2800mmio_shmem_init_lock,
+	.shmem_lock		= rt2800mmio_shmem_lock,
+	.shmem_unlock		= rt2800mmio_shmem_unlock,
 };
 
 static const struct rt2x00lib_ops rt2800pci_rt2x00_ops = {

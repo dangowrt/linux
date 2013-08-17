@@ -40,6 +40,11 @@ struct rt2800_drv_data {
 	DECLARE_BITMAP(sta_ids, STA_IDS_SIZE);
 
 	unsigned long rt2800_flags;
+
+	union {
+		spinlock_t spin;
+		struct mutex mutex;
+	} shmem_lock;
 };
 
 
@@ -71,6 +76,10 @@ struct rt2800_ops {
 				  const u8 *data, const size_t len);
 	int (*drv_init_registers)(struct rt2x00_dev *rt2x00dev);
 	__le32 *(*drv_get_txwi)(struct queue_entry *entry);
+
+	void (*shmem_init_lock)(struct rt2x00_dev *rt2x00dev);
+	void (*shmem_lock)(struct rt2x00_dev *rt2x00dev);
+	void (*shmem_unlock)(struct rt2x00_dev *rt2x00dev);
 };
 
 static inline bool rt2800_has_high_shared_mem(struct rt2x00_dev *rt2x00dev)
@@ -78,6 +87,29 @@ static inline bool rt2800_has_high_shared_mem(struct rt2x00_dev *rt2x00dev)
 	struct rt2800_drv_data *drv_data = rt2x00dev->drv_data;
 
 	return test_bit(RT2800_HAS_HIGH_SHARED_MEM, &drv_data->rt2800_flags);
+}
+
+static inline void rt2800_shared_mem_init_lock(struct rt2x00_dev *rt2x00dev)
+{
+	const struct rt2800_ops *rt2800ops = rt2x00dev->ops->drv;
+
+	rt2800ops->shmem_init_lock(rt2x00dev);
+}
+
+static inline void rt2800_shared_mem_lock(struct rt2x00_dev *rt2x00dev)
+{
+	const struct rt2800_ops *rt2800ops = rt2x00dev->ops->drv;
+
+	if (rt2800_has_high_shared_mem(rt2x00dev))
+		rt2800ops->shmem_lock(rt2x00dev);
+}
+
+static inline void rt2800_shared_mem_unlock(struct rt2x00_dev *rt2x00dev)
+{
+	const struct rt2800_ops *rt2800ops = rt2x00dev->ops->drv;
+
+	if (rt2800_has_high_shared_mem(rt2x00dev))
+		rt2800ops->shmem_unlock(rt2x00dev);
 }
 
 static inline void rt2800_register_read(struct rt2x00_dev *rt2x00dev,

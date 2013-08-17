@@ -820,8 +820,10 @@ int rt2800mmio_init_registers(struct rt2x00_dev *rt2x00dev)
 	rt2x00_set_field32(&reg, WPDMA_RST_IDX_DRX_IDX0, 1);
 	rt2x00mmio_register_write(rt2x00dev, WPDMA_RST_IDX, reg);
 
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2x00mmio_register_write(rt2x00dev, PBF_SYS_CTRL, 0x00000e1f);
 	rt2x00mmio_register_write(rt2x00dev, PBF_SYS_CTRL, 0x00000e00);
+	rt2800_shared_mem_unlock(rt2x00dev);
 
 	if (rt2x00_is_pcie(rt2x00dev) &&
 	    (rt2x00_rt(rt2x00dev, RT3090) ||
@@ -864,6 +866,30 @@ int rt2800mmio_enable_radio(struct rt2x00_dev *rt2x00dev)
 	return rt2800_enable_radio(rt2x00dev);
 }
 EXPORT_SYMBOL_GPL(rt2800mmio_enable_radio);
+
+void rt2800mmio_shmem_init_lock(struct rt2x00_dev *rt2x00dev)
+{
+	struct rt2800_drv_data *drv_data = rt2x00dev->drv_data;
+
+	spin_lock_init(&drv_data->shmem_lock.spin);
+}
+EXPORT_SYMBOL_GPL(rt2800mmio_shmem_init_lock);
+
+void rt2800mmio_shmem_lock(struct rt2x00_dev *rt2x00dev)
+{
+	struct rt2800_drv_data *drv_data = rt2x00dev->drv_data;
+
+	spin_lock_bh(&drv_data->shmem_lock.spin);
+}
+EXPORT_SYMBOL_GPL(rt2800mmio_shmem_lock);
+
+void rt2800mmio_shmem_unlock(struct rt2x00_dev *rt2x00dev)
+{
+	struct rt2800_drv_data *drv_data = rt2x00dev->drv_data;
+
+	spin_unlock_bh(&drv_data->shmem_lock.spin);
+}
+EXPORT_SYMBOL_GPL(rt2800mmio_shmem_unlock);
 
 MODULE_AUTHOR(DRV_PROJECT);
 MODULE_VERSION(DRV_VERSION);

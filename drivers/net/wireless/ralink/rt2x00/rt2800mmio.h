@@ -160,4 +160,8 @@ int rt2800mmio_init_registers(struct rt2x00_dev *rt2x00dev);
 /* Device state switch handlers. */
 int rt2800mmio_enable_radio(struct rt2x00_dev *rt2x00dev);
 
+void rt2800mmio_shmem_init_lock(struct rt2x00_dev *rt2x00dev);
+void rt2800mmio_shmem_lock(struct rt2x00_dev *rt2x00dev);
+void rt2800mmio_shmem_unlock(struct rt2x00_dev *rt2x00dev);
+
 #endif /* RT2800MMIO_H */

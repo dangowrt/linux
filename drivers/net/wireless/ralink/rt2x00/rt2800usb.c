@@ -51,6 +51,27 @@ static bool rt2800usb_hwcrypt_disabled(struct rt2x00_dev *rt2x00dev)
 	return modparam_nohwcrypt;
 }
 
+static void rt2800usb_shmem_init_lock(struct rt2x00_dev *rt2x00dev)
+{
+	struct rt2800_drv_data *drv_data = rt2x00dev->drv_data;
+
+	mutex_init(&drv_data->shmem_lock.mutex);
+}
+
+static void rt2800usb_shmem_lock(struct rt2x00_dev *rt2x00dev)
+{
+	struct rt2800_drv_data *drv_data = rt2x00dev->drv_data;
+
+	mutex_lock(&drv_data->shmem_lock.mutex);
+}
+
+static void rt2800usb_shmem_unlock(struct rt2x00_dev *rt2x00dev)
+{
+	struct rt2800_drv_data *drv_data = rt2x00dev->drv_data;
+
+	mutex_unlock(&drv_data->shmem_lock.mutex);
+}
+
 /*
  * Queue handlers.
  */
@@ -299,8 +320,10 @@ static int rt2800usb_write_firmware(struct rt2x00_dev *rt2x00dev,
 					      data + offset, length);
 	}
 
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2x00usb_register_write(rt2x00dev, H2M_MAILBOX_CID, ~0);
 	rt2x00usb_register_write(rt2x00dev, H2M_MAILBOX_STATUS, ~0);
+	rt2800_shared_mem_unlock(rt2x00dev);
 
 	/*
 	 * Send firmware request to device to load firmware,
@@ -315,7 +338,10 @@ static int rt2800usb_write_firmware(struct rt2x00_dev *rt2x00dev,
 	}
 
 	msleep(10);
+
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2x00usb_register_write(rt2x00dev, H2M_MAILBOX_CSR, 0);
+	rt2800_shared_mem_unlock(rt2x00dev);
 
 	return 0;
 }
@@ -333,8 +359,10 @@ static int rt2800usb_init_registers(struct rt2x00_dev *rt2x00dev)
 	if (rt2800_wait_csr_ready(rt2x00dev))
 		return -EBUSY;
 
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2x00usb_register_read(rt2x00dev, PBF_SYS_CTRL, &reg);
 	rt2x00usb_register_write(rt2x00dev, PBF_SYS_CTRL, reg & ~0x00002000);
+	rt2800_shared_mem_unlock(rt2x00dev);
 
 	reg = 0;
 	rt2x00_set_field32(&reg, MAC_SYS_CTRL_RESET_CSR, 1);
@@ -860,6 +888,9 @@ static const struct rt2800_ops rt2800usb_rt2800_ops = {
 	.drv_write_firmware	= rt2800usb_write_firmware,
 	.drv_init_registers	= rt2800usb_init_registers,
 	.drv_get_txwi		= rt2800usb_get_txwi,
+	.shmem_init_lock	= rt2800usb_shmem_init_lock,
+	.shmem_lock		= rt2800usb_shmem_lock,
+	.shmem_unlock		= rt2800usb_shmem_unlock,
 };
 
 static const struct rt2x00lib_ops rt2800usb_rt2x00_ops = {

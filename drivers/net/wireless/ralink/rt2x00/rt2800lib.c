@@ -451,11 +451,13 @@ void rt2800_mcu_request(struct rt2x00_dev *rt2x00dev,
 		rt2x00_set_field32(&reg, H2M_MAILBOX_CSR_CMD_TOKEN, token);
 		rt2x00_set_field32(&reg, H2M_MAILBOX_CSR_ARG0, arg0);
 		rt2x00_set_field32(&reg, H2M_MAILBOX_CSR_ARG1, arg1);
+		rt2800_shared_mem_lock(rt2x00dev);
 		rt2800_register_write_lock(rt2x00dev, H2M_MAILBOX_CSR, reg);
 
 		reg = 0;
 		rt2x00_set_field32(&reg, HOST_CMD_CSR_HOST_COMMAND, command);
 		rt2800_register_write_lock(rt2x00dev, HOST_CMD_CSR, reg);
+		rt2800_shared_mem_unlock(rt2x00dev);
 	}
 
 	mutex_unlock(&rt2x00dev->csr_mutex);
@@ -674,7 +676,9 @@ int rt2800_load_firmware(struct rt2x00_dev *rt2x00dev,
 	 * Wait for device to stabilize.
 	 */
 	for (i = 0; i < REGISTER_BUSY_COUNT; i++) {
+		rt2800_shared_mem_lock(rt2x00dev);
 		rt2800_register_read(rt2x00dev, PBF_SYS_CTRL, &reg);
+		rt2800_shared_mem_unlock(rt2x00dev);
 		if (rt2x00_get_field32(reg, PBF_SYS_CTRL_READY))
 			break;
 		msleep(1);
@@ -694,10 +698,16 @@ int rt2800_load_firmware(struct rt2x00_dev *rt2x00dev,
 	/*
 	 * Initialize firmware.
 	 */
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2800_register_write(rt2x00dev, H2M_BBP_AGENT, 0);
 	rt2800_register_write(rt2x00dev, H2M_MAILBOX_CSR, 0);
+	rt2800_shared_mem_unlock(rt2x00dev);
+
 	if (rt2x00_is_usb(rt2x00dev)) {
+		rt2800_shared_mem_lock(rt2x00dev);
 		rt2800_register_write(rt2x00dev, H2M_INT_SRC, 0);
+		rt2800_shared_mem_unlock(rt2x00dev);
+
 		rt2800_mcu_request(rt2x00dev, MCU_BOOT_SIGNAL, 0, 0, 0);
 	}
 	msleep(1);
@@ -1035,8 +1045,10 @@ void rt2800_write_beacon(struct queue_entry *entry, struct txentry_desc *txdesc)
 
 	beacon_base = rt2800_hw_beacon_base(rt2x00dev, entry->entry_idx);
 
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2800_register_multiwrite(rt2x00dev, beacon_base, entry->skb->data,
 				   entry->skb->len + padding_len);
+	rt2800_shared_mem_unlock(rt2x00dev);
 	__set_bit(ENTRY_BCN_ENABLED, &entry->flags);
 
 	/*
@@ -1066,6 +1078,8 @@ static inline void rt2800_clear_beacon_register(struct rt2x00_dev *rt2x00dev,
 
 	beacon_base = rt2800_hw_beacon_base(rt2x00dev, index);
 
+	rt2800_shared_mem_lock(rt2x00dev);
+
 	/*
 	 * For the Beacon base registers we only need to clear
 	 * the whole TXWI which (when set to 0) will invalidate
@@ -1073,6 +1087,8 @@ static inline void rt2800_clear_beacon_register(struct rt2x00_dev *rt2x00dev,
 	 */
 	for (i = 0; i < txwi_desc_size; i += sizeof(__le32))
 		rt2800_register_write(rt2x00dev, beacon_base + i, 0);
+
+	rt2800_shared_mem_unlock(rt2x00dev);
 }
 
 void rt2800_clear_beacon(struct queue_entry *entry)
@@ -1261,7 +1277,9 @@ static void rt2800_delete_wcid_attr(struct rt2x00_dev *rt2x00dev, int wcid)
 {
 	u32 offset;
 	offset = MAC_WCID_ATTR_ENTRY(wcid);
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2800_register_write(rt2x00dev, offset, 0);
+	rt2800_shared_mem_unlock(rt2x00dev);
 }
 
 static void rt2800_config_wcid_attr_bssidx(struct rt2x00_dev *rt2x00dev,
@@ -1274,11 +1292,13 @@ static void rt2800_config_wcid_attr_bssidx(struct rt2x00_dev *rt2x00dev,
 	 * The BSS Idx numbers is split in a main value of 3 bits,
 	 * and a extended field for adding one additional bit to the value.
 	 */
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2800_register_read(rt2x00dev, offset, &reg);
 	rt2x00_set_field32(&reg, MAC_WCID_ATTRIBUTE_BSS_IDX, (bssidx & 0x7));
 	rt2x00_set_field32(&reg, MAC_WCID_ATTRIBUTE_BSS_IDX_EXT,
 			   (bssidx & 0x8) >> 3);
 	rt2800_register_write(rt2x00dev, offset, reg);
+	rt2800_shared_mem_unlock(rt2x00dev);
 }
 
 static void rt2800_config_wcid_attr_cipher(struct rt2x00_dev *rt2x00dev,
@@ -1291,6 +1311,7 @@ static void rt2800_config_wcid_attr_cipher(struct rt2x00_dev *rt2x00dev,
 
 	offset = MAC_WCID_ATTR_ENTRY(key->hw_key_idx);
 
+	rt2800_shared_mem_lock(rt2x00dev);
 	if (crypto->cmd == SET_KEY) {
 		rt2800_register_read(rt2x00dev, offset, &reg);
 		rt2x00_set_field32(&reg, MAC_WCID_ATTRIBUTE_KEYTAB,
@@ -1315,6 +1336,7 @@ static void rt2800_config_wcid_attr_cipher(struct rt2x00_dev *rt2x00dev,
 		rt2x00_set_field32(&reg, MAC_WCID_ATTRIBUTE_RX_WIUDF, 0);
 		rt2800_register_write(rt2x00dev, offset, reg);
 	}
+	rt2800_shared_mem_unlock(rt2x00dev);
 
 	offset = MAC_IVEIV_ENTRY(key->hw_key_idx);
 
@@ -1324,8 +1346,11 @@ static void rt2800_config_wcid_attr_cipher(struct rt2x00_dev *rt2x00dev,
 	    (crypto->cipher == CIPHER_AES))
 		iveiv_entry.iv[3] |= 0x20;
 	iveiv_entry.iv[3] |= key->keyidx << 6;
+
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2800_register_multiwrite(rt2x00dev, offset,
 				      &iveiv_entry, sizeof(iveiv_entry));
+	rt2800_shared_mem_unlock(rt2x00dev);
 }
 
 int rt2800_config_shared_key(struct rt2x00_dev *rt2x00dev,
@@ -1348,8 +1373,11 @@ int rt2800_config_shared_key(struct rt2x00_dev *rt2x00dev,
 		       sizeof(key_entry.rx_mic));
 
 		offset = SHARED_KEY_ENTRY(key->hw_key_idx);
+
+		rt2800_shared_mem_lock(rt2x00dev);
 		rt2800_register_multiwrite(rt2x00dev, offset,
 					      &key_entry, sizeof(key_entry));
+		rt2800_shared_mem_unlock(rt2x00dev);
 	}
 
 	/*
@@ -1364,10 +1392,12 @@ int rt2800_config_shared_key(struct rt2x00_dev *rt2x00dev,
 
 	offset = SHARED_KEY_MODE_ENTRY(key->hw_key_idx / 8);
 
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2800_register_read(rt2x00dev, offset, &reg);
 	rt2x00_set_field32(&reg, field,
 			   (crypto->cmd == SET_KEY) * crypto->cipher);
 	rt2800_register_write(rt2x00dev, offset, reg);
+	rt2800_shared_mem_unlock(rt2x00dev);
 
 	/*
 	 * Update WCID information
@@ -1405,8 +1435,11 @@ int rt2800_config_pairwise_key(struct rt2x00_dev *rt2x00dev,
 		       sizeof(key_entry.rx_mic));
 
 		offset = PAIRWISE_KEY_ENTRY(key->hw_key_idx);
+
+		rt2800_shared_mem_lock(rt2x00dev);
 		rt2800_register_multiwrite(rt2x00dev, offset,
 					      &key_entry, sizeof(key_entry));
+		rt2800_shared_mem_unlock(rt2x00dev);
 	}
 
 	/*
@@ -4930,14 +4963,19 @@ static int rt2800_init_registers(struct rt2x00_dev *rt2x00dev)
 	/*
 	 * ASIC will keep garbage value after boot, clear encryption keys.
 	 */
+	rt2800_shared_mem_lock(rt2x00dev);
 	for (i = 0; i < 4; i++)
 		rt2800_register_write(rt2x00dev,
 					 SHARED_KEY_MODE_ENTRY(i), 0);
+	rt2800_shared_mem_unlock(rt2x00dev);
 
 	for (i = 0; i < 256; i++) {
 		rt2800_config_wcid(rt2x00dev, NULL, i);
 		rt2800_delete_wcid_attr(rt2x00dev, i);
+
+		rt2800_shared_mem_lock(rt2x00dev);
 		rt2800_register_write(rt2x00dev, MAC_IVEIV_ENTRY(i), 0);
+		rt2800_shared_mem_unlock(rt2x00dev);
 	}
 
 	/*
@@ -5063,8 +5101,10 @@ static int rt2800_wait_bbp_ready(struct rt2x00_dev *rt2x00dev)
 	 * BBP was enabled after firmware was loaded,
 	 * but we need to reactivate it now.
 	 */
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2800_register_write(rt2x00dev, H2M_BBP_AGENT, 0);
 	rt2800_register_write(rt2x00dev, H2M_MAILBOX_CSR, 0);
+	rt2800_shared_mem_unlock(rt2x00dev);
 	msleep(1);
 
 	for (i = 0; i < REGISTER_BUSY_COUNT; i++) {
@@ -6760,11 +6800,19 @@ int rt2800_enable_radio(struct rt2x00_dev *rt2x00dev)
 	/*
 	 * Send signal during boot time to initialize firmware.
 	 */
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2800_register_write(rt2x00dev, H2M_BBP_AGENT, 0);
 	rt2800_register_write(rt2x00dev, H2M_MAILBOX_CSR, 0);
-	if (rt2x00_is_usb(rt2x00dev))
+	rt2800_shared_mem_unlock(rt2x00dev);
+
+	if (rt2x00_is_usb(rt2x00dev)) {
+		rt2800_shared_mem_lock(rt2x00dev);
 		rt2800_register_write(rt2x00dev, H2M_INT_SRC, 0);
+		rt2800_shared_mem_unlock(rt2x00dev);
+	}
+
 	rt2800_mcu_request(rt2x00dev, MCU_BOOT_SIGNAL, 0, 0, 0);
+
 	msleep(1);
 
 	/*
@@ -7774,6 +7822,8 @@ int rt2800_probe_hw(struct rt2x00_dev *rt2x00dev)
 	int retval;
 	u32 reg;
 
+	rt2800_shared_mem_init_lock(rt2x00dev);
+
 	retval = rt2800_probe_rt(rt2x00dev);
 	if (retval)
 		return retval;
@@ -7857,8 +7907,11 @@ void rt2800_get_key_seq(struct ieee80211_hw *hw,
 		return;
 
 	offset = MAC_IVEIV_ENTRY(key->hw_key_idx);
+
+	rt2800_shared_mem_lock(rt2x00dev);
 	rt2800_register_multiread(rt2x00dev, offset,
 				      &iveiv_entry, sizeof(iveiv_entry));
+	rt2800_shared_mem_unlock(rt2x00dev);
 
 	memcpy(&seq->tkip.iv16, &iveiv_entry.iv[0], 2);
 	memcpy(&seq->tkip.iv32, &iveiv_entry.iv[4], 4);
