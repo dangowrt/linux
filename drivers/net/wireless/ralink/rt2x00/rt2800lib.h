@@ -22,6 +22,10 @@
 
 #include "rt2800.h"
 
+enum rt2800_flag {
+	RT2800_HAS_HIGH_SHARED_MEM,
+};
+
 /* RT2800 driver data structure */
 struct rt2800_drv_data {
 	u8 calibration_bw20;
@@ -34,6 +38,8 @@ struct rt2800_drv_data {
 	unsigned int tbtt_tick;
 	unsigned int ampdu_factor_cnt[4];
 	DECLARE_BITMAP(sta_ids, STA_IDS_SIZE);
+
+	unsigned long rt2800_flags;
 };
 
 
@@ -66,6 +72,13 @@ struct rt2800_ops {
 	int (*drv_init_registers)(struct rt2x00_dev *rt2x00dev);
 	__le32 *(*drv_get_txwi)(struct queue_entry *entry);
 };
+
+static inline bool rt2800_has_high_shared_mem(struct rt2x00_dev *rt2x00dev)
+{
+	struct rt2800_drv_data *drv_data = rt2x00dev->drv_data;
+
+	return test_bit(RT2800_HAS_HIGH_SHARED_MEM, &drv_data->rt2800_flags);
+}
 
 static inline void rt2800_register_read(struct rt2x00_dev *rt2x00dev,
 					const unsigned int offset,

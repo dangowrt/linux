@@ -7770,12 +7770,16 @@ static int rt2800_probe_rt(struct rt2x00_dev *rt2x00dev)
 
 int rt2800_probe_hw(struct rt2x00_dev *rt2x00dev)
 {
+	struct rt2800_drv_data *drv_data = rt2x00dev->drv_data;
 	int retval;
 	u32 reg;
 
 	retval = rt2800_probe_rt(rt2x00dev);
 	if (retval)
 		return retval;
+
+	if (rt2x00_rt(rt2x00dev, RT3593))
+		__set_bit(RT2800_HAS_HIGH_SHARED_MEM, &drv_data->rt2800_flags);
 
 	/*
 	 * Allocate eeprom data.
