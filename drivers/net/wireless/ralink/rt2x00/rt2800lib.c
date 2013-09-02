@@ -4665,6 +4665,30 @@ static int rt2800_init_registers(struct rt2x00_dev *rt2x00dev)
 	if (ret)
 		return ret;
 
+	if (drv_data->hw_beacon_count == 16) {
+		rt2800_register_read(rt2x00dev, BCN_OFFSET2, &reg);
+		rt2x00_set_field32(&reg, BCN_OFFSET2_BCN8,
+				   rt2800_get_beacon_offset(rt2x00dev, 8));
+		rt2x00_set_field32(&reg, BCN_OFFSET2_BCN9,
+				   rt2800_get_beacon_offset(rt2x00dev, 9));
+		rt2x00_set_field32(&reg, BCN_OFFSET2_BCN10,
+				   rt2800_get_beacon_offset(rt2x00dev, 10));
+		rt2x00_set_field32(&reg, BCN_OFFSET2_BCN11,
+				   rt2800_get_beacon_offset(rt2x00dev, 11));
+		rt2800_register_write(rt2x00dev, BCN_OFFSET2, reg);
+
+		rt2800_register_read(rt2x00dev, BCN_OFFSET3, &reg);
+		rt2x00_set_field32(&reg, BCN_OFFSET3_BCN12,
+				   rt2800_get_beacon_offset(rt2x00dev, 12));
+		rt2x00_set_field32(&reg, BCN_OFFSET3_BCN13,
+				   rt2800_get_beacon_offset(rt2x00dev, 13));
+		rt2x00_set_field32(&reg, BCN_OFFSET3_BCN14,
+				   rt2800_get_beacon_offset(rt2x00dev, 14));
+		rt2x00_set_field32(&reg, BCN_OFFSET3_BCN15,
+				   rt2800_get_beacon_offset(rt2x00dev, 15));
+		rt2800_register_write(rt2x00dev, BCN_OFFSET3, reg);
+	}
+
 	rt2800_register_write(rt2x00dev, LEGACY_BASIC_RATE, 0x0000013f);
 	rt2800_register_write(rt2x00dev, HT_BASIC_RATE, 0x00008003);
 
