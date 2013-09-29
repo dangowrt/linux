@@ -97,7 +97,8 @@ static inline void rt2800_shared_mem_select(struct rt2x00_dev *rt2x00dev,
 
 static inline bool rt2800_beacon_uses_high_mem(struct rt2x00_dev *rt2x00dev)
 {
-	if (rt2x00_rt(rt2x00dev, RT3593))
+	if (rt2x00_rt(rt2x00dev, RT3593) ||
+	    rt2x00_rt(rt2x00dev, RT3883))
 		return true;
 
 	return false;
