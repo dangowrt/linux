@@ -1994,7 +1994,8 @@ static void rt2800_config_lna_gain(struct rt2x00_dev *rt2x00dev,
 		rt2800_eeprom_read(rt2x00dev, EEPROM_LNA, &eeprom);
 		lna_gain = rt2x00_get_field16(eeprom, EEPROM_LNA_A0);
 	} else if (libconf->rf.channel <= 128) {
-		if (rt2x00_rt(rt2x00dev, RT3593)) {
+		if (rt2x00_rt(rt2x00dev, RT3593) ||
+		    rt2x00_rt(rt2x00dev, RT3883)) {
 			rt2800_eeprom_read(rt2x00dev, EEPROM_EXT_LNA2, &eeprom);
 			lna_gain = rt2x00_get_field16(eeprom,
 						      EEPROM_EXT_LNA2_A1);
@@ -2004,7 +2005,8 @@ static void rt2800_config_lna_gain(struct rt2x00_dev *rt2x00dev,
 						      EEPROM_RSSI_BG2_LNA_A1);
 		}
 	} else {
-		if (rt2x00_rt(rt2x00dev, RT3593)) {
+		if (rt2x00_rt(rt2x00dev, RT3593) ||
+		    rt2x00_rt(rt2x00dev, RT3883)) {
 			rt2800_eeprom_read(rt2x00dev, EEPROM_EXT_LNA2, &eeprom);
 			lna_gain = rt2x00_get_field16(eeprom,
 						      EEPROM_EXT_LNA2_A2);
