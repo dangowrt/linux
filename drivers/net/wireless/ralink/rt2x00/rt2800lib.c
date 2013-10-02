@@ -4017,6 +4017,9 @@ static u8 rt2800_compensate_txpower(struct rt2x00_dev *rt2x00dev, int is_rate_b,
 	if (rt2x00_rt(rt2x00dev, RT3593))
 		return min_t(u8, txpower, 0xc);
 
+	if (rt2x00_rt(rt2x00dev, RT3883))
+		return min_t(u8, txpower, 0xf);
+
 	if (rt2x00_has_cap_power_limit(rt2x00dev)) {
 		/*
 		 * Check if eirp txpower exceed txpower_limit.
