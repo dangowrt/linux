@@ -127,7 +127,11 @@ ltq_mtd_probe(struct platform_device *pdev)
 	if (!ltq_mtd->map)
 		return -ENOMEM;
 
-	ltq_mtd->map->phys = ltq_mtd->res->start;
+	if (of_find_property(pdev->dev.of_node, "lantiq,noxip", NULL))
+		ltq_mtd->map->phys = NO_XIP;
+	else
+		ltq_mtd->map->phys = ltq_mtd->res->start;
+	ltq_mtd->res->start;
 	ltq_mtd->map->size = resource_size(ltq_mtd->res);
 
 	ltq_mtd->map->name = ltq_map_name;
