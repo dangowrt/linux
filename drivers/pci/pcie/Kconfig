@@ -64,6 +64,7 @@ config PCIEAER_CXL
 config PCIE_ECRC
 	bool "PCI Express ECRC settings control"
 	depends on PCIEAER
+	default n
 	help
 	  Used to override firmware/bios settings for PCI Express ECRC
 	  (transaction layer end-to-end CRC checking).

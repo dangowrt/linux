@@ -278,3 +278,30 @@ char *__init pcibios_setup(char *str)
 		return pcibios_plat_setup(str);
 	return str;
 }
+
+int pcibios_host_nr(void)
+{
+    int count = 0;
+    struct pci_controller *hose;
+    list_for_each_entry(hose, &controllers, list) {
+        count++;
+    }
+    return count;
+}
+EXPORT_SYMBOL(pcibios_host_nr);
+
+int pcibios_1st_host_bus_nr(void)
+{
+    int bus_nr = 0;
+    struct pci_controller *hose;
+
+    hose = list_first_entry_or_null(&controllers, struct pci_controller, list);
+
+    if (hose != NULL) {
+        if (hose->bus != NULL) {
+            bus_nr = hose->bus->number + 1;
+        }
+    }
+    return bus_nr;
+}
+EXPORT_SYMBOL(pcibios_1st_host_bus_nr);
