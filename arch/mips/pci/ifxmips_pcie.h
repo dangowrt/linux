@@ -96,13 +96,13 @@ struct ifx_pci_controller {
 };
 
 typedef struct ifx_pcie_ir_irq {
-    const unsigned int irq;
+    unsigned int irq;
     const char name[16];
 }ifx_pcie_ir_irq_t;
 
 typedef struct ifx_pcie_legacy_irq{
     const u32 irq_bit;
-    const int irq;
+    int irq;
 }ifx_pcie_legacy_irq_t;
 
 typedef struct ifx_pcie_irq {

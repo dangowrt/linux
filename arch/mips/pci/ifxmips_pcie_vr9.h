@@ -22,8 +22,6 @@
 #include <linux/gpio.h>
 #include <lantiq_soc.h>
 
-#define IFX_PCIE_GPIO_RESET  494
-
 #define IFX_REG_R32    ltq_r32
 #define IFX_REG_W32    ltq_w32
 #define CONFIG_IFX_PCIE_HW_SWAP
@@ -54,21 +52,6 @@
 #define OUT			((volatile u32*)(IFX_GPIO + 0x0070))
 
 
-static inline void pcie_ep_gpio_rst_init(int pcie_port)
-{
-
-	gpio_request(IFX_PCIE_GPIO_RESET, "pcie-reset");
-	gpio_direction_output(IFX_PCIE_GPIO_RESET, 1);
-	gpio_set_value(IFX_PCIE_GPIO_RESET, 1);
-
-/*    ifx_gpio_pin_reserve(IFX_PCIE_GPIO_RESET, ifx_pcie_gpio_module_id);
-    ifx_gpio_output_set(IFX_PCIE_GPIO_RESET, ifx_pcie_gpio_module_id);
-    ifx_gpio_dir_out_set(IFX_PCIE_GPIO_RESET, ifx_pcie_gpio_module_id);
-    ifx_gpio_altsel0_clear(IFX_PCIE_GPIO_RESET, ifx_pcie_gpio_module_id);
-    ifx_gpio_altsel1_clear(IFX_PCIE_GPIO_RESET, ifx_pcie_gpio_module_id);
-    ifx_gpio_open_drain_set(IFX_PCIE_GPIO_RESET, ifx_pcie_gpio_module_id);*/
-}
-
 static inline void pcie_ahb_pmu_setup(void) 
 {
 	/* Enable AHB bus master/slave */
@@ -78,24 +61,6 @@ static inline void pcie_ahb_pmu_setup(void)
 
     //AHBM_PMU_SETUP(IFX_PMU_ENABLE);
     //AHBS_PMU_SETUP(IFX_PMU_ENABLE);
-}
-
-static inline void pcie_rcu_endian_setup(int pcie_port)
-{
-    u32 reg;
-
-    reg = IFX_REG_R32(IFX_RCU_AHB_ENDIAN);
-#ifdef CONFIG_IFX_PCIE_HW_SWAP
-    reg |= IFX_RCU_AHB_BE_PCIE_M;
-    reg |= IFX_RCU_AHB_BE_PCIE_S;
-    reg &= ~IFX_RCU_AHB_BE_XBAR_M;
-#else 
-    reg |= IFX_RCU_AHB_BE_PCIE_M;
-    reg &= ~IFX_RCU_AHB_BE_PCIE_S;
-    reg &= ~IFX_RCU_AHB_BE_XBAR_M;
-#endif /* CONFIG_IFX_PCIE_HW_SWAP */
-    IFX_REG_W32(reg, IFX_RCU_AHB_ENDIAN);
-    IFX_PCIE_PRINT(PCIE_MSG_REG, "%s IFX_RCU_AHB_ENDIAN: 0x%08x\n", __func__, IFX_REG_R32(IFX_RCU_AHB_ENDIAN));
 }
 
 static inline void pcie_phy_pmu_enable(int pcie_port)
@@ -116,17 +81,6 @@ static inline void pcie_phy_pmu_disable(int pcie_port)
 //    PCIE_PHY_PMU_SETUP(IFX_PMU_DISABLE);
 }
 
-static inline void pcie_pdi_big_endian(int pcie_port)
-{
-    u32 reg;
-
-    /* SRAM2PDI endianness control. */
-    reg = IFX_REG_R32(IFX_RCU_AHB_ENDIAN);
-    /* Config AHB->PCIe and PDI endianness */
-    reg |= IFX_RCU_AHB_BE_PCIE_PDI;
-    IFX_REG_W32(reg, IFX_RCU_AHB_ENDIAN);
-}
-
 static inline void pcie_pdi_pmu_enable(int pcie_port)
 {
     /* Enable PDI to access PCIe PHY register */
@@ -134,65 +88,6 @@ static inline void pcie_pdi_pmu_enable(int pcie_port)
 	clk = clk_get_sys("1d900000.pcie", "pdi");
 	clk_enable(clk);
     //PDI_PMU_SETUP(IFX_PMU_ENABLE);
-}
-
-static inline void pcie_core_rst_assert(int pcie_port)
-{
-    u32 reg;
-
-    reg = IFX_REG_R32(IFX_RCU_RST_REQ);
-
-    /* Reset PCIe PHY & Core, bit 22, bit 26 may be affected if write it directly  */
-    reg |= 0x00400000;
-    IFX_REG_W32(reg, IFX_RCU_RST_REQ);
-}
-
-static inline void pcie_core_rst_deassert(int pcie_port)
-{
-    u32 reg;
-
-    /* Make sure one micro-second delay */
-    udelay(1);
-
-    /* Reset PCIe PHY & Core, bit 22 */
-    reg = IFX_REG_R32(IFX_RCU_RST_REQ);
-    reg &= ~0x00400000;
-    IFX_REG_W32(reg, IFX_RCU_RST_REQ);
-}
-
-static inline void pcie_phy_rst_assert(int pcie_port)
-{
-    u32 reg;
-
-    reg = IFX_REG_R32(IFX_RCU_RST_REQ);
-    reg |= 0x00001000; /* Bit 12 */
-    IFX_REG_W32(reg, IFX_RCU_RST_REQ);
-}
-
-static inline void pcie_phy_rst_deassert(int pcie_port)
-{
-    u32 reg;
-
-    /* Make sure one micro-second delay */
-    udelay(1);
-
-    reg = IFX_REG_R32(IFX_RCU_RST_REQ);
-    reg &= ~0x00001000; /* Bit 12 */
-    IFX_REG_W32(reg, IFX_RCU_RST_REQ);
-}
-
-static inline void pcie_device_rst_assert(int pcie_port)
-{
-	gpio_set_value(IFX_PCIE_GPIO_RESET, 0);
-//    ifx_gpio_output_clear(IFX_PCIE_GPIO_RESET, ifx_pcie_gpio_module_id);
-}
-
-static inline void pcie_device_rst_deassert(int pcie_port)
-{
-    mdelay(100);
-	gpio_direction_output(IFX_PCIE_GPIO_RESET, 1);
-//    gpio_set_value(IFX_PCIE_GPIO_RESET, 1);
-    //ifx_gpio_output_set(IFX_PCIE_GPIO_RESET, ifx_pcie_gpio_module_id);
 }
 
 static inline void pcie_core_pmu_setup(int pcie_port)
