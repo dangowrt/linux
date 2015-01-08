@@ -96,6 +96,15 @@ config PINCTRL_FALCON
 	depends on SOC_FALCON
 	depends on PINCTRL_LANTIQ
 
+config PINCTRL_OXNAS
+	bool "OXNAS pinctrl driver"
+	depends on OF
+	depends on ARCH_OXNAS
+	select PINMUX
+	select PINCONF
+	help
+	  Say Y here to enable the oxnas pinctrl driver
+
 config PINCTRL_ROCKCHIP
 	bool
 	select PINMUX
