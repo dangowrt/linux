@@ -1573,6 +1573,14 @@ unsigned ata_exec_internal_sg(struct ata_device *dev,
 		return AC_ERR_SYSTEM;
 	}
 
+	if (ap->ops->acquire_hw && !ap->ops->acquire_hw(ap, 0, 0)) {
+		spin_unlock_irqrestore(ap->lock, flags);
+		if (!ap->ops->acquire_hw(ap, 1, (2*HZ))) {
+			return AC_ERR_TIMEOUT;
+		}
+		spin_lock_irqsave(ap->lock, flags);
+	}
+
 	/* initialize internal qc */
 
 	/* XXX: Tag 0 is used for drivers with legacy EH as some
@@ -4747,6 +4755,9 @@ static struct ata_queued_cmd *ata_qc_new(struct ata_port *ap)
 	if (unlikely(ap->pflags & ATA_PFLAG_FROZEN))
 		return NULL;
 
+	if (ap->ops->qc_new && ap->ops->qc_new(ap))
+		return NULL;
+
 	for (i = 0, tag = ap->last_tag + 1; i < max_queue; i++, tag++) {
 		tag = tag < max_queue ? tag : 0;
 
@@ -4813,6 +4824,8 @@ void ata_qc_free(struct ata_queued_cmd *qc)
 	if (likely(ata_tag_valid(tag))) {
 		qc->tag = ATA_TAG_POISON;
 		clear_bit(tag, &ap->qc_allocated);
+		if (ap->ops->qc_free)
+			ap->ops->qc_free(qc);
 	}
 }
 
