@@ -102,4 +102,9 @@ config PCI_LAYERSCAPE
 	help
 	  Say Y here if you want PCIe controller support on Layerscape SoCs.
 
+config PCI_OXNAS
+	bool "PLX Oxnas PCIe controller"
+	depends on ARCH_OXNAS
+	select PCIEPORTBUS
+
 endmenu
