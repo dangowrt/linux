@@ -36,10 +36,14 @@ extern const struct plat_smp_ops vsmp_smp_ops;
 static struct plat_smp_ops lantiq_smp_ops;
 #endif
 
+/* for Multithreading (APRP), vpe.c will use it */
+unsigned long cp0_memsize;
+
 const char *get_system_type(void)
 {
 	return soc_info.sys_type;
 }
+EXPORT_SYMBOL(ltq_soc_type);
 
 int ltq_soc_type(void)
 {

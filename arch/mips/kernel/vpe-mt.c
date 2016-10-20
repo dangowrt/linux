@@ -414,6 +414,8 @@ int __init vpe_module_init(void)
 			}
 
 			v->ntcs = hw_tcs - aprp_cpu_index();
+			write_tc_c0_tcbind((read_tc_c0_tcbind() &
+						~TCBIND_CURVPE) | 1);
 
 			/* add the tc to the list of this vpe's tc's. */
 			list_add(&t->tc, &v->tc);
@@ -517,3 +519,47 @@ void __exit vpe_module_exit(void)
 			release_vpe(v);
 	}
 }
+
+#ifdef CONFIG_IFX_VPE_EXT
+int32_t vpe1_sw_start(void *sw_start_addr, uint32_t tcmask, uint32_t flags)
+{
+	enum vpe_state state;
+	struct vpe *v = get_vpe(tclimit);
+	struct vpe_notifications *not;
+
+	if (tcmask || flags) {
+		pr_warn("Currently tcmask and flags should be 0. Other values are not supported\n");
+		return -1;
+	}
+
+	state = xchg(&v->state, VPE_STATE_INUSE);
+	if (state != VPE_STATE_UNUSED) {
+		vpe_stop(v);
+
+		list_for_each_entry(not, &v->notify, list) {
+			not->stop(tclimit);
+		}
+	}
+
+	v->__start = (unsigned long)sw_start_addr;
+
+	if (!vpe_run(v)) {
+		pr_debug("VPE loader: VPE1 running successfully\n");
+		return 0;
+	}
+	return -1;
+}
+EXPORT_SYMBOL(vpe1_sw_start);
+
+int32_t vpe1_sw_stop(uint32_t flags)
+{
+	struct vpe *v = get_vpe(tclimit);
+
+	if (!vpe_free(v)) {
+		pr_debug("RP Stopped\n");
+		return 0;
+	} else
+		return -1;
+}
+EXPORT_SYMBOL(vpe1_sw_stop);
+#endif

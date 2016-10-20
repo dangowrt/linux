@@ -31,6 +31,9 @@
 #define read_c0_vpeconf1()		__read_32bit_c0_register($1, 3)
 #define write_c0_vpeconf1(val)		__write_32bit_c0_register($1, 3, val)
 
+#define read_c0_vpeopt()		__read_32bit_c0_register($1, 7)
+#define write_c0_vpeopt(val)		__write_32bit_c0_register($1, 7, val)
+
 #define read_c0_tcstatus()		__read_32bit_c0_register($2, 1)
 #define write_c0_tcstatus(val)		__write_32bit_c0_register($2, 1, val)
 
@@ -429,6 +432,8 @@ do {									\
 #define write_vpe_c0_vpeconf0(val)	mttc0($1, 2, val)
 #define read_vpe_c0_vpeconf1()		mftc0($1, 3)
 #define write_vpe_c0_vpeconf1(val)	mttc0($1, 3, val)
+#define read_vpe_c0_vpeopt()		mftc0($1, 7)
+#define write_vpe_c0_vpeopt(val)	mttc0($1, 7, val)
 #define read_vpe_c0_count()		mftc0($9, 0)
 #define write_vpe_c0_count(val)		mttc0($9, 0, val)
 #define read_vpe_c0_status()		mftc0($12, 0)

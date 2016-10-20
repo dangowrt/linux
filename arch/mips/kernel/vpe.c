@@ -50,6 +50,41 @@ struct vpe_control vpecontrol = {
 	.tc_list	= LIST_HEAD_INIT(vpecontrol.tc_list)
 };
 
+#ifdef CONFIG_IFX_VPE_EXT
+unsigned int vpe1_load_addr;
+
+static int __init load_address(char *str)
+{
+	get_option(&str, &vpe1_load_addr);
+	return 1;
+}
+__setup("vpe1_load_addr=", load_address);
+
+static unsigned int vpe1_mem;
+static int __init vpe1mem(char *str)
+{
+	vpe1_mem = memparse(str, &str);
+	return 1;
+}
+__setup("vpe1_mem=", vpe1mem);
+
+uint32_t vpe1_get_load_addr(uint32_t flags)
+{
+	return vpe1_load_addr;
+}
+EXPORT_SYMBOL(vpe1_get_load_addr);
+
+uint32_t vpe1_get_max_mem(uint32_t flags)
+{
+	if (!vpe1_mem)
+		return P_SIZE;
+	else
+		return vpe1_mem;
+}
+EXPORT_SYMBOL(vpe1_get_max_mem);
+
+#endif
+
 /* get the vpe associated with this minor */
 struct vpe *get_vpe(int minor)
 {

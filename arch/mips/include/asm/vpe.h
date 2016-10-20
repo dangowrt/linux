@@ -126,5 +126,13 @@ int vpe_start(void *vpe, unsigned long start);
 int vpe_stop(void *vpe);
 int vpe_free(void *vpe);
 #endif /* CONFIG_MIPS_VPE_LOADER_MT */
+ 
+/* For the explanation of the APIs please refer the section "MT APRP Kernel
+ * Programming" in AR9 SW Architecture Specification
+ */
+int32_t vpe1_sw_start(void *sw_start_addr, uint32_t tcmask, uint32_t flags);
+int32_t vpe1_sw_stop(uint32_t flags);
+uint32_t vpe1_get_load_addr(uint32_t flags);
+uint32_t vpe1_get_max_mem(uint32_t flags);
 
 #endif /* _ASM_VPE_H */
