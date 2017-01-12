@@ -36,6 +36,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/clk.h>
 
 #include "rt2x00.h"
 #include "rt2800lib.h"
@@ -8227,6 +8228,27 @@ static const struct rf_channel rf_vals_5592_xtal40[] = {
 	{196, 83, 0, 12, 1},
 };
 
+/*
+ * RF value list for rt3xxx with Xtal20MHz
+ * Supports: 2.4 GHz (all) (RF3322)
+ */
+static const struct rf_channel rf_vals_xtal20mhz_3x[] = {
+	{1,    0xE2,	 2,  0x14},
+	{2,    0xE3,	 2,  0x14},
+	{3,    0xE4,	 2,  0x14},
+	{4,    0xE5,	 2,  0x14},
+	{5,    0xE6,	 2,  0x14},
+	{6,    0xE7,	 2,  0x14},
+	{7,    0xE8,	 2,  0x14},
+	{8,    0xE9,	 2,  0x14},
+	{9,    0xEA,	 2,  0x14},
+	{10,   0xEB,	 2,  0x14},
+	{11,   0xEC,	 2,  0x14},
+	{12,   0xED,	 2,  0x14},
+	{13,   0xEE,	 2,  0x14},
+	{14,   0xF0,	 2,  0x18},
+};
+
 static int rt2800_probe_hw_mode(struct rt2x00_dev *rt2x00dev)
 {
 	struct hw_mode_spec *spec = &rt2x00dev->spec;
@@ -8316,7 +8338,10 @@ static int rt2800_probe_hw_mode(struct rt2x00_dev *rt2x00dev)
 	case RF5390:
 	case RF5392:
 		spec->num_channels = 14;
-		spec->channels = rf_vals_3x;
+		if (spec->clk_is_20mhz)
+			spec->channels = rf_vals_xtal20mhz_3x;
+		else
+			spec->channels = rf_vals_3x;
 		break;
 
 	case RF3052:
@@ -8504,6 +8529,20 @@ static int rt2800_probe_rt(struct rt2x00_dev *rt2x00dev)
 	return 0;
 }
 
+int rt2800_probe_clk(struct rt2x00_dev *rt2x00dev)
+{
+	struct hw_mode_spec *spec = &rt2x00dev->spec;
+	struct clk *clk = clk_get(rt2x00dev->dev, NULL);
+
+	if (IS_ERR(clk))
+		return PTR_ERR(clk);
+
+	if (clk_get_rate(clk) == 20000000)
+		spec->clk_is_20mhz = 1;
+
+	return 0;
+}
+
 int rt2800_probe_hw(struct rt2x00_dev *rt2x00dev)
 {
 	struct rt2800_drv_data *drv_data = rt2x00dev->drv_data;
@@ -8544,6 +8583,15 @@ int rt2800_probe_hw(struct rt2x00_dev *rt2x00dev)
 	rt2800_register_read(rt2x00dev, GPIO_CTRL, &reg);
 	rt2x00_set_field32(&reg, GPIO_CTRL_DIR2, 1);
 	rt2800_register_write(rt2x00dev, GPIO_CTRL, reg);
+
+	/*
+	 * Probe SoC clock.
+	 */
+	if (rt2x00_is_soc(rt2x00dev)) {
+		retval = rt2800_probe_clk(rt2x00dev);
+		if (retval)
+			return retval;
+	}
 
 	/*
 	 * Initialize hw specifications.

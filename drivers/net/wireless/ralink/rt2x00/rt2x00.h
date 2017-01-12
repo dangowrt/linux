@@ -400,6 +400,7 @@ static inline struct rt2x00_intf* vif_to_intf(struct ieee80211_vif *vif)
  * @channels: Device/chipset specific channel values (See &struct rf_channel).
  * @channels_info: Additional information for channels (See &struct channel_info).
  * @ht: Driver HT Capabilities (See &ieee80211_sta_ht_cap).
+ * @clk_is_20mhz: External crystal of WiSoC is 20MHz instead of 40MHz
  */
 struct hw_mode_spec {
 	unsigned int supported_bands;
@@ -415,6 +416,7 @@ struct hw_mode_spec {
 	const struct channel_info *channels_info;
 
 	struct ieee80211_sta_ht_cap ht;
+	int clk_is_20mhz;
 };
 
 /*
