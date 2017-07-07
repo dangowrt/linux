@@ -53,6 +53,7 @@ static const struct compress_format compressed_formats[] __initconst = {
 	{ .magic = {0x1f, 0x9e}, .name = "gzip", .decompressor = gunzip },
 	{ .magic = {0x42, 0x5a}, .name = "bzip2", .decompressor = bunzip2 },
 	{ .magic = {0x5d, 0x00}, .name = "lzma", .decompressor = unlzma },
+	{ .magic = {0x6d, 0x00}, .name = "lzma-openwrt", .decompressor = unlzma },
 	{ .magic = {0xfd, 0x37}, .name = "xz", .decompressor = unxz },
 	{ .magic = {0x89, 0x4c}, .name = "lzo", .decompressor = unlzo },
 	{ .magic = {0x02, 0x21}, .name = "lz4", .decompressor = unlz4 },
