@@ -1208,7 +1208,8 @@ static void resched_task(struct task_struct *p)
 {
 	int cpu;
 
-	assert_spin_locked(&task_rq(p)->lock);
+	//assert_spin_locked(&task_rq(p)->lock);
+	WARN_ON(!spin_is_locked(&task_rq(p)->lock));
 
 	if (test_tsk_need_resched(p))
 		return;
@@ -2677,7 +2678,7 @@ void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
 
 	p->prio = effective_prio(p);
 
-	if (!p->sched_class->task_new || !current->se.on_rq) {
+	if (!p->sched_class->task_new || !current->se.on_rq || !rq->cfs.curr) {
 		activate_task(rq, p, 0);
 	} else {
 		/*
@@ -5960,8 +5961,9 @@ void set_user_nice(struct task_struct *p, long nice)
 		 * If the task increased its priority or is running and
 		 * lowered its priority, then reschedule its CPU:
 		 */
-		if (delta < 0 || (delta > 0 && task_running(rq, p)))
+		if (delta < 0 || (delta > 0 && task_running(rq, p))) {
 			resched_task(rq->curr);
+		}
 	}
 out_unlock:
 	task_rq_unlock(rq, &flags);

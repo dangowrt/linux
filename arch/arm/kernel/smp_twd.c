@@ -148,6 +148,13 @@ void __cpuinit twd_timer_setup(struct clock_event_device *clk)
 
 	twd_calibrate_rate();
 
+	// -> [Walker Chen], 2010/07/20 - Restart rps-timer
+	#include <mach/hardware.h>
+	#include <mach/rps-timer.h>
+	*((volatile unsigned long*)TIMER1_CONTROL) |=(TIMER_ENABLE_ENABLE   << TIMER_ENABLE_BIT);	 // rps-timer Enable
+	// <- End.
+
+
 	clk->name = "local_timer";
 	clk->features = CLOCK_EVT_FEAT_PERIODIC | CLOCK_EVT_FEAT_ONESHOT;
 	clk->rating = 350;

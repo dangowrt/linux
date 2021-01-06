@@ -42,6 +42,29 @@ extern void usb_hub_cleanup(void);
 extern int usb_major_init(void);
 extern void usb_major_cleanup(void);
 
+#if defined(CONFIG_USB_ETRON_HUB)
+extern int usb_is_etron_hcd(struct usb_device *udev);
+extern void ethub_usb_kick_kethubd(struct usb_device *hdev);
+extern void ethub_usb_set_device_state(struct usb_device *udev,
+		enum usb_device_state new_state);
+extern void ethub_usb_disconnect(struct usb_device **pdev);
+extern int ethub_usb_new_device(struct usb_device *udev);
+extern int ethub_usb_deauthorize_device(struct usb_device *usb_dev);
+extern int ethub_usb_authorize_device(struct usb_device *usb_dev);
+extern int ethub_usb_port_suspend(struct usb_device *udev, pm_message_t msg);
+extern int ethub_usb_port_resume(struct usb_device *udev, pm_message_t msg);
+extern void ethub_usb_root_hub_lost_power(struct usb_device *rhdev);
+extern void ethub_usb_ep0_reinit(struct usb_device *udev);
+extern int ethub_usb_reset_device(struct usb_device *udev);
+extern int ethub_init(void);
+extern void ethub_cleanup(void);
+extern void etapi_usb_release_dev(struct device *dev);
+extern int etapi_usb_set_interface(struct usb_device *dev, int interface, int alternate);
+extern int etapi_usb_reset_configuration(struct usb_device *dev);
+extern int etapi_usb_set_configuration(struct usb_device *dev, int configuration);
+extern int etapi_usb_driver_set_configuration(struct usb_device *udev, int config);
+#endif
+
 #ifdef	CONFIG_PM
 
 extern int usb_suspend(struct device *dev, pm_message_t msg);

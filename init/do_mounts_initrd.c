@@ -77,6 +77,14 @@ static void __init handle_initrd(void)
 	sys_close(old_fd);
 	sys_close(root_fd);
 
+// -> [Walker Chen], 2010/07/19 - debug for ubifs and MTD
+//printk("do_mount_initrd: real_root_dev = %x \n",new_decode_dev(real_root_dev));
+extern int sys_is_ubifs;
+//printk("sys_is_ubifs=%d\n",sys_is_ubifs);
+if (sys_is_ubifs ==1 )
+		return;
+// <- End.
+
 	if (new_decode_dev(real_root_dev) == Root_RAM0) {
 		sys_chdir("/old");
 		return;

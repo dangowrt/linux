@@ -42,6 +42,12 @@
 #define PRINT_RAID_DEBUG	_IO (MD_MAJOR, 0x13)
 #define RAID_AUTORUN		_IO (MD_MAJOR, 0x14)
 #define GET_BITMAP_FILE		_IOR (MD_MAJOR, 0x15, mdu_bitmap_file_t)
+// -> [Teresa Chiu] 04/24/2008, 
+// 1. call ioctl CREATE_NEW_RAID to set flag for a new raid array
+// 2. call ioctl MANAGE_EXIST_RAID to set flag for a existing raid array
+#define CREATE_NEW_RAID		_IO (MD_MAJOR, 0x1e)
+#define MANAGE_EXIST_RAID	_IO (MD_MAJOR, 0x1f)
+// <- end
 
 /* configuration */
 #define CLEAR_ARRAY		_IO (MD_MAJOR, 0x20)

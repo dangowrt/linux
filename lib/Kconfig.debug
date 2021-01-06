@@ -706,6 +706,15 @@ config RCU_TORTURE_TEST
 	  Say M if you want the RCU torture tests to build as a module.
 	  Say N if you are unsure.
 
+config ATOMIC_TORTURE_TEST
+	tristate "torture tests for atomic operations"
+	depends on DEBUG_KERNEL
+	default n
+	help
+	  This option provides a kernel module that runs torture tests
+	  on the atomic operations (ARM LDREX/STREX)
+	  Say N if you are unsure.
+
 config RCU_TORTURE_TEST_RUNNABLE
 	bool "torture tests for RCU runnable by default"
 	depends on RCU_TORTURE_TEST = y

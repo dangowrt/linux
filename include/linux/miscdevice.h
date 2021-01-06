@@ -12,6 +12,9 @@
 #define APOLLO_MOUSE_MINOR	7
 #define PC110PAD_MINOR		9
 /*#define ADB_MOUSE_MINOR	10	FIXME OBSOLETE */
+// -> [J.Chiang], 2010/08/11 - Added for Aton-Button driver
+#define BTNSDEV_MINOR  		72	/* Aton btns */
+// <- End.
 #define WATCHDOG_MINOR		130	/* Watchdog timer     */
 #define TEMP_MINOR		131	/* Temperature Sensor */
 #define RTC_MINOR		135

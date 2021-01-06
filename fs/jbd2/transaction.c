@@ -775,6 +775,77 @@ int jbd2_journal_get_write_access(handle_t *handle, struct buffer_head *bh)
 	return rc;
 }
 
+/**
+ * notify intent to write a buffer with data (special handle for fast write access)
+ * 'Normal' writes use the page cache and are flushed through a different mechanism. Fast writes
+ * need to notify the journal of their intent to use buffers, since they may previously have held metadata
+ * which may have been revoked, or not made it to disk for some other reason. 
+ */
+int jbd2_journal_get_data_write_access(handle_t * handle, struct buffer_head *bh)
+{
+	transaction_t *transaction = handle->h_transaction;
+	journal_t *journal = transaction->t_journal;
+	struct journal_head *jh = jbd2_journal_grab_journal_head(bh);
+	int error = 0;
+
+	if (!jh)
+		return 0;
+	if (is_handle_aborted(handle))
+		return -EROFS;
+
+repeat:
+	jbd_lock_bh_state(bh);
+
+	/*
+	 * The buffer is already part of this transaction if b_transaction or
+	 * b_next_transaction points to it
+	 * Shouldn't happen: data shouldn't be in a transaction (well, except in data=journalled mode...)
+	 */
+	if (jh->b_transaction == transaction ||
+	    jh->b_next_transaction == transaction){
+		printk(KERN_INFO "unexpected flow %s/%u\n", __FILE__, __LINE__);
+		goto done;
+	}
+
+	/*
+	 * If there is already a copy-out version of this buffer, then we don't
+	 * need to make another one. Again, highly unlikely - this buffer shouldn't be on this transaction
+	 */
+	if (jh->b_frozen_data) {
+		printk(KERN_INFO "unexpected flow %s/%u\n", __FILE__, __LINE__);
+		goto done;
+	}
+
+	/* Is this buffer on the committing transaction? */
+
+	if (jh->b_transaction && jh->b_transaction != transaction) 
+	{
+		DEFINE_WAIT(wait);
+
+		//printk(KERN_DEBUG "waiting on block:%lld, tid:%d (on list %d)\n", bh->b_blocknr, jh->b_transaction->t_tid, jh->b_jlist );
+
+		if (jh->b_jlist == BJ_Forget) {
+			// the committing transaction doesn't need the data anymore
+			//printk(KERN_DEBUG "on forget list - it's fine\n");
+			goto done;
+		}
+
+		/* just wait until the committing transaction has finished */
+
+		prepare_to_wait(&journal->j_wait_transaction_locked, &wait, TASK_UNINTERRUPTIBLE);
+		jbd_unlock_bh_state(bh);
+		schedule();
+		finish_wait(&journal->j_wait_transaction_locked, &wait);
+		//printk(KERN_DEBUG "I'm awake, I'm awake!!\n");
+		goto repeat;
+	}
+done:
+	clear_buffer_dirty(bh);
+
+	jbd_unlock_bh_state(bh);
+	jbd2_journal_put_journal_head(jh);
+	return error;
+}
 
 /*
  * When the user wants to journal a newly created buffer_head

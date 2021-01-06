@@ -95,6 +95,7 @@ struct usb_hcd {
 #define HCD_FLAG_SAW_IRQ	0x00000002
 
 	unsigned		rh_registered:1;/* is root hub registered? */
+	unsigned		msix_enabled:1;	/* driver has MSI-X enabled? */
 
 	/* The next flag is a stopgap, to be removed when all the HCDs
 	 * support the new root-hub polling mechanism. */
@@ -111,7 +112,23 @@ struct usb_hcd {
 	u64			rsrc_len;	/* memory/io resource length */
 	unsigned		power_budget;	/* in mA, 0 = no limit */
 
-#define HCD_BUFFER_POOLS	4
+	/* bandwidth_mutex should be taken before adding or removing
+	 * any new bus bandwidth constraints:
+	 *   1. Before adding a configuration for a new device.
+	 *   2. Before removing the configuration to put the device into
+	 *      the addressed state.
+	 *   3. Before selecting a different configuration.
+	 *   4. Before selecting an alternate interface setting.
+	 *
+	 * bandwidth_mutex should be dropped after a successful control message
+	 * to the device, or resetting the bandwidth after a failed attempt.
+	 */
+	struct mutex		bandwidth_mutex;
+
+// -> [J.Chiang], 2011/05/28 - Extended page pool to 64KB for net.USB requirement
+//#define HCD_BUFFER_POOLS	4
+#define HCD_BUFFER_POOLS	6
+// <- End.
 	struct dma_pool		*pool [HCD_BUFFER_POOLS];
 
 	int			state;
@@ -267,6 +284,12 @@ struct hc_driver {
 	void	(*reset_bandwidth)(struct usb_hcd *, struct usb_device *);
 		/* Returns the hardware-chosen device address */
 	int	(*address_device)(struct usb_hcd *, struct usb_device *udev);
+		/* Notifies the HCD after a hub descriptor is fetched.
+		 * Will block.
+		 */
+	int	(*update_hub_device)(struct usb_hcd *, struct usb_device *hdev,
+			struct usb_tt *tt, gfp_t mem_flags);
+	int	(*reset_device)(struct usb_hcd *, struct usb_device *);
 };
 
 extern int usb_hcd_link_urb_to_ep(struct usb_hcd *hcd, struct urb *urb);
@@ -379,8 +402,15 @@ extern void usb_destroy_configuration(struct usb_device *dev);
 #define SetHubFeature		(0x2000 | USB_REQ_SET_FEATURE)
 #define SetPortFeature		(0x2300 | USB_REQ_SET_FEATURE)
 
+#ifdef CONFIG_USB_EHCI_ROOT_HUB_TT
+#define ResetHubTT			(0x2308)
+#endif
 
 /*-------------------------------------------------------------------------*/
+
+/* class requests from USB 3.0 hub spec, table 10-5 */
+#define SetHubDepth		(0x3000 | HUB_SET_DEPTH)
+#define GetPortErrorCount	(0x8000 | HUB_GET_PORT_ERR_COUNT)
 
 /*
  * Generic bandwidth allocation constants/support
@@ -425,6 +455,11 @@ extern long usb_calc_bus_time(int speed, int is_input,
 			int isoc, int bytecount);
 
 /*-------------------------------------------------------------------------*/
+
+extern int usb_register_root_hub(struct usb_device *usb_dev,
+		struct device *parent_dev);
+
+extern void usb_hcd_release(struct usb_bus *);
 
 extern void usb_set_device_state(struct usb_device *udev,
 		enum usb_device_state new_state);
@@ -526,7 +561,7 @@ static inline void usbmon_urb_complete(struct usb_bus *bus, struct urb *urb,
 
 /* hub.h ... DeviceRemovable in 2.4.2-ac11, gone in 2.4.10 */
 /* bleech -- resurfaced in 2.4.11 or 2.4.12 */
-#define bitmap 	DeviceRemovable
+#define bitmap 	u.hs.DeviceRemovable
 
 
 /*-------------------------------------------------------------------------*/

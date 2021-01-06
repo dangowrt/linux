@@ -253,7 +253,13 @@ static int msdos_add_entry(struct inode *dir, const unsigned char *name,
 	fat_time_unix2fat(sbi, ts, &time, &date, NULL);
 	de.cdate = de.adate = 0;
 	de.ctime = 0;
+	// -> [J.Chiang], 2010/10/26 - Try to support vFAT's file size larger than 4GB
+	#ifdef CONFIG_FAT32_OVER4GB	
+	//de.ctime_cs = 0;
+	#else
 	de.ctime_cs = 0;
+	#endif
+	// <- End.
 	de.time = time;
 	de.date = date;
 	de.start = cpu_to_le16(cluster);

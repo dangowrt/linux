@@ -30,6 +30,10 @@
 #include "hcd.h"
 #include "hub.h"
 
+// -> [Walker Chen], 2010/01/28 - USB find device test
+extern unsigned int usb_device_in_use;
+// <- End.
+
 /* if we are in debug mode, always announce new devices */
 #ifdef DEBUG
 #ifndef CONFIG_USB_ANNOUNCE_NEW_DEVICES
@@ -384,6 +388,11 @@ static void kick_khubd(struct usb_hub *hub)
 
 void usb_kick_khubd(struct usb_device *hdev)
 {
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(hdev))
+		return ethub_usb_kick_kethubd(hdev);
+#endif
+
 	/* FIXME: What if hdev isn't bound to the hub driver? */
 	kick_khubd(hdev_to_hub(hdev));
 }
@@ -646,6 +655,7 @@ static void hub_activate(struct usb_hub *hub, enum hub_activation_type type)
 	int status;
 	bool need_debounce_delay = false;
 	unsigned delay;
+	int start_port;
 
 	/* Continue a partial initialization */
 	if (type == HUB_INIT2)
@@ -688,7 +698,25 @@ static void hub_activate(struct usb_hub *hub, enum hub_activation_type type)
 	/* Check each port and set hub->change_bits to let khubd know
 	 * which ports need attention.
 	 */
-	for (port1 = 1; port1 <= hdev->maxchild; ++port1) {
+
+	#if defined(CONFIG_USB_GADGET_78XX) || defined(CONFIG_USB_GADGET_78XX_MODULE)
+		if (!hdev->parent) {
+	//		printk("hub_activate() Excluding first port\n");
+			start_port = 2;
+		} else
+			start_port = 1;
+	#else // CONFIG_USB_GADGET_78XX
+		start_port = 1;
+	#endif
+
+	// -> [Walker Chen],2011/02/09 - 7715_USB_GADGET debug
+	#if defined(CONFIG_BOARD_ATON7715 ) || defined(CONFIG_BOARD_N1N505 )
+		start_port = 1;
+		//printk("USB:HUB:hub_activate:start_port=%d, hdev->maxchild=%d \n",start_port,hdev->maxchild);
+	#endif
+	// <- end
+
+		for (port1 = start_port; port1 <= hdev->maxchild; ++port1) {
 		struct usb_device *udev = hdev->children[port1-1];
 		u16 portstatus, portchange;
 
@@ -911,7 +939,7 @@ static int hub_configure(struct usb_hub *hub,
 		char	portstr [USB_MAXCHILDREN + 1];
 
 		for (i = 0; i < hdev->maxchild; i++)
-			portstr[i] = hub->descriptor->DeviceRemovable
+			portstr[i] = hub->descriptor->bitmap
 				    [((i + 1) / 8)] & (1 << ((i + 1) % 8))
 				? 'F' : 'R';
 		portstr[hdev->maxchild] = 0;
@@ -1154,6 +1182,11 @@ static int hub_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	desc = intf->cur_altsetting;
 	hdev = interface_to_usbdev(intf);
 
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(hdev))
+		return -ENODEV;
+#endif
+
 	if (hdev->level == MAX_TOPO_LEVEL) {
 		dev_err(&intf->dev,
 			"Unsupported bus topology: hub nested too deep\n");
@@ -1291,6 +1324,11 @@ void usb_set_device_state(struct usb_device *udev,
 		enum usb_device_state new_state)
 {
 	unsigned long flags;
+
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(udev))
+		return ethub_usb_set_device_state(udev, new_state);
+#endif
 
 	spin_lock_irqsave(&device_state_lock, flags);
 	if (udev->state == USB_STATE_NOTATTACHED)
@@ -1432,6 +1470,11 @@ void usb_disconnect(struct usb_device **pdev)
 	struct usb_device	*udev = *pdev;
 	int			i;
 
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(*pdev))
+		return ethub_usb_disconnect(pdev);
+#endif
+
 	if (!udev) {
 		pr_debug ("%s nodev\n", __func__);
 		return;
@@ -1443,7 +1486,11 @@ void usb_disconnect(struct usb_device **pdev)
 	 */
 	usb_set_device_state(udev, USB_STATE_NOTATTACHED);
 	dev_info (&udev->dev, "USB disconnect, address %d\n", udev->devnum);
-
+	// -> [Walker Chen], 2010/01/28 - USB find device test
+	//printk("USB:HUB:usb_disconnect\n" );
+	usb_device_in_use--;
+	//printk("usb_device_in_use=%d\n",usb_device_in_use);
+	// <- End.
 	usb_lock_device(udev);
 
 	/* Free up all the children before we remove this device */
@@ -1627,6 +1674,11 @@ static int usb_configure_device(struct usb_device *udev)
 		udev->serial = usb_cache_string(udev, udev->descriptor.iSerialNumber);
 	}
 	err = usb_configure_device_otg(udev);
+	// -> [Walker Chen], 2010/01/28 - USB find device test
+	//if(err==0)printk("USB:HUB:usb_configure_device\n");
+	usb_device_in_use++;
+	//printk("usb_device_in_use=%d\n",usb_device_in_use);
+	// <- End.
 fail:
 	return err;
 }
@@ -1655,6 +1707,11 @@ fail:
 int usb_new_device(struct usb_device *udev)
 {
 	int err;
+
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(udev))
+		return ethub_usb_new_device(udev);
+#endif
 
 	/* Increment the parent's count of unsuspended children */
 	if (udev->parent)
@@ -1707,6 +1764,12 @@ fail:
 int usb_deauthorize_device(struct usb_device *usb_dev)
 {
 	unsigned cnt;
+
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(usb_dev))
+		return ethub_usb_deauthorize_device(usb_dev);
+#endif
+
 	usb_lock_device(usb_dev);
 	if (usb_dev->authorized == 0)
 		goto out_unauthorized;
@@ -1730,6 +1793,12 @@ out_unauthorized:
 int usb_authorize_device(struct usb_device *usb_dev)
 {
 	int result = 0, c;
+
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(usb_dev))
+		return ethub_usb_authorize_device(usb_dev);
+#endif
+
 	usb_lock_device(usb_dev);
 	if (usb_dev->authorized == 1)
 		goto out_authorized;
@@ -2012,6 +2081,11 @@ int usb_port_suspend(struct usb_device *udev, pm_message_t msg)
 	int		port1 = udev->portnum;
 	int		status;
 
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(udev))
+		return ethub_usb_port_suspend(udev, msg);
+#endif
+
 	// dev_dbg(hub->intfdev, "suspend port %d\n", port1);
 
 	/* enable remote wakeup when appropriate; this lets the device
@@ -2172,6 +2246,11 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
 	int		status;
 	u16		portchange, portstatus;
 
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(udev))
+		return ethub_usb_port_resume(udev, msg);
+#endif
+
 	/* Skip the initial Clear-Suspend step for a remote wakeup */
 	status = hub_port_status(hub, port1, &portstatus, &portchange);
 	if (status == 0 && !(portstatus & USB_PORT_STAT_SUSPEND))
@@ -2242,6 +2321,11 @@ static int remote_wakeup(struct usb_device *udev)
 
 int usb_port_suspend(struct usb_device *udev, pm_message_t msg)
 {
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(udev))
+		return ethub_usb_port_suspend(udev, msg);
+#endif
+
 	return 0;
 }
 
@@ -2253,6 +2337,11 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
 	int		port1 = udev->portnum;
 	int		status;
 	u16		portchange, portstatus;
+
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(udev))
+		return ethub_usb_port_resume(udev, msg);
+#endif
 
 	status = hub_port_status(hub, port1, &portstatus, &portchange);
 	status = check_port_resume_type(udev,
@@ -2332,6 +2421,11 @@ static int hub_reset_resume(struct usb_interface *intf)
  */
 void usb_root_hub_lost_power(struct usb_device *rhdev)
 {
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(rhdev))
+		return ethub_usb_root_hub_lost_power(rhdev);
+#endif
+
 	dev_warn(&rhdev->dev, "root hub lost power or was reset\n");
 	rhdev->reset_resume = 1;
 }
@@ -2408,6 +2502,11 @@ static int hub_port_debounce(struct usb_hub *hub, int port1)
 
 void usb_ep0_reinit(struct usb_device *udev)
 {
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(udev))
+		return ethub_usb_ep0_reinit(udev);
+#endif
+
 	usb_disable_endpoint(udev, 0 + USB_DIR_IN, true);
 	usb_disable_endpoint(udev, 0 + USB_DIR_OUT, true);
 	usb_enable_endpoint(udev, &udev->ep0, true);
@@ -3069,6 +3168,7 @@ static void hub_events(void)
 	 * Not the most efficient, but avoids deadlocks.
 	 */
 	while (1) {
+		int start_port;
 
 		/* Grab the first entry at the beginning of the list */
 		spin_lock_irq(&hub_event_lock);
@@ -3135,7 +3235,23 @@ static void hub_events(void)
 		}
 
 		/* deal with port status changes */
-		for (i = 1; i <= hub->descriptor->bNbrPorts; i++) {
+#if defined(CONFIG_USB_GADGET_78XX) || defined(CONFIG_USB_GADGET_78XX_MODULE)
+		if (!hub->hdev->parent) {
+//			printk("hub_events() Excluding first port\n");
+			start_port = 2;
+		} else
+			start_port = 1;
+#else // CONFIG_USB_GADGET_78XX
+		start_port = 1;
+#endif
+
+	// -> [Walker Chen],2011/02/09 - 7715_USB_GADGET debug
+	#if defined(CONFIG_BOARD_ATON7715 ) || defined(CONFIG_BOARD_N1N505 )
+		start_port = 1;
+		//printk("USB:HUB:hub_events:start_port=%d, hub->descriptor->bNbrPorts=%d \n",start_port,hub->descriptor->bNbrPorts);
+	#endif
+	// <- end
+		for (i = start_port; i <= hub->descriptor->bNbrPorts; i++) {
 			if (test_bit(i, hub->busy_bits))
 				continue;
 			connect_change = test_bit(i, hub->change_bits);
@@ -3564,6 +3680,11 @@ int usb_reset_device(struct usb_device *udev)
 	int ret;
 	int i;
 	struct usb_host_config *config = udev->actconfig;
+
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(udev))
+		return ethub_usb_reset_device(udev);
+#endif
 
 	if (udev->state == USB_STATE_NOTATTACHED ||
 			udev->state == USB_STATE_SUSPENDED) {

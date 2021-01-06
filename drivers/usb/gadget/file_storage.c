@@ -224,11 +224,21 @@
  * into a header file plus about 3 separate .c files, to handle the details
  * of the Gadget, USB Mass Storage, and SCSI protocols.
  */
+/* J J Larkworthy @ PLX Technology Inc.
+ * 9 November 2010 - Add vendor specific command handling. 
+ * This makes available a register/unregister handler command which 
+ * allows a module to support passing vendor specific commands to an 
+ * alternative handler. Currently this forwards the commands on to the 
+ * user space. The commands are recognised by one of the operation functions
+ * and the action despatched to either of the do_vendor_? functions to 
+ * forward or retrieve bulk data.
+ */
+//#define DEBUG
 
+//#define VERBOSE_DEBUG 
+//#define DUMP_MSGS 
 
-/* #define VERBOSE_DEBUG */
-/* #define DUMP_MSGS */
-
+#define EXPORT_SYMTAB 1
 
 #include <linux/blkdev.h>
 #include <linux/completion.h>
@@ -239,6 +249,8 @@
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/kref.h>
+#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/kthread.h>
 #include <linux/limits.h>
 #include <linux/rwsem.h>
@@ -254,8 +266,7 @@
 #include <linux/usb/gadget.h>
 
 #include "gadget_chips.h"
-
-
+#include <linux/vend_scsi_cmd.h>
 
 /*
  * Kbuild is not very cooperative with respect to linking separately
@@ -267,6 +278,7 @@
 #include "usbstring.c"
 #include "config.c"
 #include "epautoconf.c"
+
 
 /*-------------------------------------------------------------------------*/
 
@@ -505,27 +517,36 @@ struct interrupt_data {
 #define SC_READ_6			0x08
 #define SC_READ_10			0x28
 #define SC_READ_12			0xa8
+#define SC_READ_16			0x88
 #define SC_READ_CAPACITY		0x25
+#define SC_READ_CAPACITY_16		0x9E
 #define SC_READ_FORMAT_CAPACITIES	0x23
 #define SC_READ_HEADER			0x44
 #define SC_READ_TOC			0x43
 #define SC_RELEASE			0x17
 #define SC_REQUEST_SENSE		0x03
 #define SC_RESERVE			0x16
+#define SC_RECEIVE_DIAGNOSTIC		0x1c
 #define SC_SEND_DIAGNOSTIC		0x1d
 #define SC_START_STOP_UNIT		0x1b
 #define SC_SYNCHRONIZE_CACHE		0x35
 #define SC_TEST_UNIT_READY		0x00
 #define SC_VERIFY			0x2f
+#define SC_VERIFY_16			0x8f
 #define SC_WRITE_6			0x0a
 #define SC_WRITE_10			0x2a
 #define SC_WRITE_12			0xaa
+#define SC_WRITE_16			0x8a
+#define SC_SEEK_6			0x0b
+#define SC_SEEK_10			0x2b
 
 /* SCSI Sense Key/Additional Sense Code/ASC Qualifier values */
 #define SS_NO_SENSE				0
+#define SS_ILLEGAL_REQUEST			0x052000
 #define SS_COMMUNICATION_FAILURE		0x040800
 #define SS_INVALID_COMMAND			0x052000
 #define SS_INVALID_FIELD_IN_CDB			0x052400
+#define SS_INVALID_PARAMETER			0x052600
 #define SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE	0x052100
 #define SS_LOGICAL_UNIT_NOT_SUPPORTED		0x052500
 #define SS_MEDIUM_NOT_PRESENT			0x023a00
@@ -536,6 +557,7 @@ struct interrupt_data {
 #define SS_UNRECOVERED_READ_ERROR		0x031100
 #define SS_WRITE_ERROR				0x030c02
 #define SS_WRITE_PROTECTED			0x072700
+#define SS_ROUNDED_PARAMETER			0x013700
 
 #define SK(x)		((u8) ((x) >> 16))	// Sense Key byte, etc.
 #define ASC(x)		((u8) ((x) >> 8))
@@ -714,6 +736,7 @@ struct fsg_dev {
 	unsigned int		nluns;
 	struct lun		*luns;
 	struct lun		*curlun;
+	struct vendor_cmds      *vendor_cmd;
 };
 
 typedef void (*fsg_routine_t)(struct fsg_dev *);
@@ -1013,7 +1036,6 @@ static struct usb_gadget_strings	stringtab = {
 	.language	= 0x0409,		// en-us
 	.strings	= strings,
 };
-
 
 /*
  * Config descriptors must agree with the code that sets configurations
@@ -1552,7 +1574,7 @@ static int sleep_thread(struct fsg_dev *fsg)
 static int do_read(struct fsg_dev *fsg)
 {
 	struct lun		*curlun = fsg->curlun;
-	u32			lba;
+	u64			lba;
 	struct fsg_buffhd	*bh;
 	int			rc;
 	u32			amount_left;
@@ -1565,6 +1587,8 @@ static int do_read(struct fsg_dev *fsg)
 	 * not too big */
 	if (fsg->cmnd[0] == SC_READ_6)
 		lba = get_unaligned_be24(&fsg->cmnd[1]);
+	else if (fsg->cmnd[0] == SC_READ_16)
+		lba = get_unaligned_be64(&fsg->cmnd[2]);
 	else {
 		lba = get_unaligned_be32(&fsg->cmnd[2]);
 
@@ -1678,7 +1702,7 @@ static int do_read(struct fsg_dev *fsg)
 static int do_write(struct fsg_dev *fsg)
 {
 	struct lun		*curlun = fsg->curlun;
-	u32			lba;
+	u64			lba;
 	struct fsg_buffhd	*bh;
 	int			get_some_more;
 	u32			amount_left_to_req, amount_left_to_write;
@@ -1700,6 +1724,8 @@ static int do_write(struct fsg_dev *fsg)
 	 * not too big */
 	if (fsg->cmnd[0] == SC_WRITE_6)
 		lba = get_unaligned_be24(&fsg->cmnd[1]);
+	else if (fsg->cmnd[0] == SC_WRITE_16)
+		lba = get_unaligned_be64(&fsg->cmnd[2]);
 	else {
 		lba = get_unaligned_be32(&fsg->cmnd[2]);
 
@@ -1912,17 +1938,23 @@ static void invalidate_sub(struct lun *curlun)
 static int do_verify(struct fsg_dev *fsg)
 {
 	struct lun		*curlun = fsg->curlun;
-	u32			lba;
+	u64			lba;
 	u32			verification_length;
 	struct fsg_buffhd	*bh = fsg->next_buffhd_to_fill;
 	loff_t			file_offset, file_offset_tmp;
-	u32			amount_left;
-	unsigned int		amount;
+	loff_t			amount_left;
+	loff_t			amount;
 	ssize_t			nread;
 
 	/* Get the starting Logical Block Address and check that it's
 	 * not too big */
-	lba = get_unaligned_be32(&fsg->cmnd[2]);
+	if (fsg->cmnd[0] == SC_VERIFY) {
+		lba = get_unaligned_be32(&fsg->cmnd[2]);
+		verification_length = get_unaligned_be16(&fsg->cmnd[7]);
+	} else {
+		lba = get_unaligned_be64(&fsg->cmnd[2]);
+		verification_length = get_unaligned_be32(&fsg->cmnd[10]);
+	}
 	if (lba >= curlun->num_sectors) {
 		curlun->sense_data = SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
 		return -EINVAL;
@@ -1935,12 +1967,11 @@ static int do_verify(struct fsg_dev *fsg)
 		return -EINVAL;
 	}
 
-	verification_length = get_unaligned_be16(&fsg->cmnd[7]);
 	if (unlikely(verification_length == 0))
 		return -EIO;		// No default reply
 
 	/* Prepare to carry out the file verify */
-	amount_left = verification_length << 9;
+	amount_left = ((loff_t) verification_length) << 9;
 	file_offset = ((loff_t) lba) << 9;
 
 	/* Write out all the dirty buffers before invalidating them */
@@ -1961,7 +1992,7 @@ static int do_verify(struct fsg_dev *fsg)
 		 * And don't try to read past the end of the file.
 		 * If this means reading 0 then we were asked to read
 		 * past the end of file. */
-		amount = min((unsigned int) amount_left, mod_data.buflen);
+		amount = min((loff_t) amount_left, (loff_t) mod_data.buflen);
 		amount = min((loff_t) amount,
 				curlun->file_length - file_offset);
 		if (amount == 0) {
@@ -1988,7 +2019,7 @@ static int do_verify(struct fsg_dev *fsg)
 					(int) nread);
 			nread = 0;
 		} else if (nread < amount) {
-			LDBG(curlun, "partial file verify: %d/%u\n",
+			LDBG(curlun, "partial file verify: %d/%llu\n",
 					(int) nread, amount);
 			nread -= (nread & 511);	// Round down to a sector
 		}
@@ -2025,8 +2056,9 @@ static int do_inquiry(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 
 	memset(buf, 0, 8);
 	buf[0] = (mod_data.cdrom ? TYPE_CDROM : TYPE_DISK);
-	if (mod_data.removable)
-		buf[1] = 0x80;
+/*	if (mod_data.removable)
+		buf[1] = 0x80;*/
+	buf[1] = 0x00;  //force RMB field to be '0'
 	buf[2] = 2;		// ANSI SCSI level 2
 	buf[3] = 2;		// SCSI-2 INQUIRY data format
 	buf[4] = 31;		// Additional length
@@ -2038,6 +2070,40 @@ static int do_inquiry(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 	return 36;
 }
 
+static int do_evpd_inquiry(struct fsg_dev *fsg, struct fsg_buffhd *bh)
+{
+	u8      *buf = (u8 *) bh->buf;
+	unsigned max_reply_size =get_unaligned_be16(&fsg->cmnd[3]);
+	if (max_reply_size >  256) max_reply_size = 256;
+
+	INFO(fsg,"do evpd inquiry:%x\n", fsg->cmnd[2]);
+
+	memset(buf, 0, max_reply_size);
+	buf[1]= fsg->cmnd[2];
+
+	switch (fsg->cmnd[2]) {
+	case 0x00 : /* supported pages list - only 1 */
+		buf[3] = 1;
+		buf[4] = 0x83; /* mandatory */
+		break;
+
+	case 0x83 : /* device descriptors */
+		buf[3]= 0; /* none set or available */
+		break;
+
+	case 80 : /* device serial no etc */
+		buf[3] = 0x14;
+		memset(&buf[4], 0x20, 0x14);
+		break;
+
+	default:
+		break;
+
+	}
+	INFO(fsg,"evpd inquiry returns:%d bytes\n", max_reply_size);
+
+	return max_reply_size;
+}
 
 static int do_request_sense(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 {
@@ -2093,6 +2159,36 @@ static int do_request_sense(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 }
 
 
+static int do_read_capacity_16(struct fsg_dev *fsg, struct fsg_buffhd *bh)
+{
+	struct lun      *curlun = fsg->curlun;
+	u8              *buf = (u8 *) bh->buf;
+	u64             lba = get_unaligned_be64(&fsg->cmnd[2]);
+	int             pmi = fsg->cmnd[14];
+	u32             buf_size = get_unaligned_be32(&fsg->cmnd[11]);
+
+	/* Check the PMI and LBA fields */
+	if (pmi > 1 || (pmi == 0 && lba != 0)) {
+		INFO(fsg,"fail param check  read capacity(16)pmi:%d, lba:%lld\n", pmi, lba);
+		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
+		return -EINVAL;
+	}
+	if (buf_size == 0)
+		return 0;
+
+	memset(buf, 0, 32);
+
+	put_unaligned_be64(curlun->num_sectors - 1, &buf[0]);
+                                               /* Max logical block */
+	put_unaligned_be32(512, &buf[8]);       /* Block length */
+
+	fsg->phase_error =0; /* clear any phase error - difference in cmd v reply size allowed */
+	/* fsg->data_size = 32; /\* force this to get windows moving again *\/ */
+	/* fsg->data_size_from_cmnd = 32; */
+
+	return 32;
+}
+
 static int do_read_capacity(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 {
 	struct lun	*curlun = fsg->curlun;
@@ -2106,7 +2202,12 @@ static int do_read_capacity(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 		return -EINVAL;
 	}
 
-	put_unaligned_be32(curlun->num_sectors - 1, &buf[0]);
+	if (curlun->num_sectors >= 0xffffffff) {
+		put_unaligned_be32(0xffffffff, &buf[0]);
+		INFO(fsg, "too large for read capacity(10)\n");
+	} else {
+		put_unaligned_be32(curlun->num_sectors - 1, &buf[0]);
+	}
 						/* Max logical block */
 	put_unaligned_be32(512, &buf[4]);	/* Block length */
 	return 8;
@@ -2138,6 +2239,11 @@ static int do_read_header(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 	u32		lba = get_unaligned_be32(&fsg->cmnd[2]);
 	u8		*buf = (u8 *) bh->buf;
 
+	if (curlun->num_sectors > 0xffff) {
+		curlun->sense_data = SS_ILLEGAL_REQUEST;
+		return -EINVAL;
+	}
+
 	if ((fsg->cmnd[1] & ~0x02) != 0) {		/* Mask away MSF */
 		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
 		return -EINVAL;
@@ -2164,6 +2270,11 @@ static int do_read_toc(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 	if ((fsg->cmnd[1] & ~0x02) != 0 ||		/* Mask away MSF */
 			start_track > 1) {
 		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
+		return -EINVAL;
+	}
+	
+	if (curlun->num_sectors > 1) {
+		curlun->sense_data = SS_ILLEGAL_REQUEST;
 		return -EINVAL;
 	}
 
@@ -2318,6 +2429,11 @@ static int do_prevent_allow(struct fsg_dev *fsg)
 	struct lun	*curlun = fsg->curlun;
 	int		prevent;
 
+	if (curlun->num_sectors > 0xffff) {
+		curlun->sense_data = SS_ILLEGAL_REQUEST;
+		return -EINVAL;
+	}	
+
 	if (!mod_data.removable) {
 		curlun->sense_data = SS_INVALID_COMMAND;
 		return -EINVAL;
@@ -2346,21 +2462,107 @@ static int do_read_format_capacities(struct fsg_dev *fsg,
 	buf[3] = 8;		// Only the Current/Maximum Capacity Descriptor
 	buf += 4;
 
-	put_unaligned_be32(curlun->num_sectors, &buf[0]);
-						/* Number of blocks */
+	if (curlun->num_sectors < 0xffffffff) {
+		put_unaligned_be32(curlun->num_sectors, &buf[0]);
+		/* Number of blocks */
+	} else {
+		curlun->sense_data = SS_ILLEGAL_REQUEST;
+		return -EINVAL;
+	}
+
 	put_unaligned_be32(512, &buf[4]);	/* Block length */
 	buf[4] = 0x02;				/* Current capacity */
 	return 12;
 }
 
 
-static int do_mode_select(struct fsg_dev *fsg, struct fsg_buffhd *bh)
+static int do_mode_select(struct fsg_dev *fsg)
 {
-	struct lun	*curlun = fsg->curlun;
+	struct lun         *curlun = fsg->curlun;
+	struct fsg_buffhd  *bh;
+	u8                 *buf;
+	u8                 get_some_more;
+	u32                amount_to_read;
+//	s16                mode_length;
+	u8                 i;
+	struct inode       *inode = NULL;
+	int ret, skip ;
 
-	/* We don't support MODE SELECT */
-	curlun->sense_data = SS_INVALID_COMMAND;
-	return -EINVAL;
+	/* read data sent in DATA_OUT phase and verify */
+	amount_to_read = fsg->data_size_from_cmnd ;
+
+	get_some_more = 1;
+	bh = fsg->next_buffhd_to_fill;
+	/* is the next buffer full of our data yet? */
+	if(bh->state == BUF_STATE_EMPTY && get_some_more) {
+
+		bh->outreq->length = bh->bulk_out_intended_length = amount_to_read;
+		bh->outreq->short_not_ok = 1;
+
+		start_transfer(fsg, fsg->bulk_out, bh->outreq,
+                	         &bh->outreq_busy, &bh->state);
+		fsg->next_buffhd_to_fill = bh->next;
+	}
+
+	bh=fsg->next_buffhd_to_drain;
+	while (bh->state != BUF_STATE_FULL)
+		if(sleep_thread(fsg)) {
+			return -EIO;
+		}
+	smp_rmb();
+	fsg->next_buffhd_to_drain = bh->next;
+	buf = bh->buf;
+
+	bh->state = BUF_STATE_EMPTY;
+	fsg->residue = 0;
+
+	/* validate header */
+	if (fsg->cmnd[0] == SC_MODE_SELECT_6) {
+		if (buf[1] | buf[2]) {
+			curlun->sense_data = SS_INVALID_PARAMETER;
+			return -EINVAL;
+		}
+		skip = buf[3] + 4;
+	} else {
+//              mode_length = get_unaligned_be16(buf);
+		for (i = 2; i < 6; i++){
+			if (buf[i]) {
+				curlun->sense_data = SS_INVALID_PARAMETER;
+				return -EINVAL;
+			}
+		}
+		skip = (get_unaligned_be16(&buf[6]) + 8);
+//              mode_length -= 8;
+	}
+
+	buf += skip;
+        //mode_length -= 2; /* remove page header */
+	/* We only support mode select on page 8 caching */
+	/* only look at first page record - ignore the rest */
+	if (buf[0] != 0x08) {
+		/* not page 8 first */
+		curlun->sense_data = SS_INVALID_PARAMETER ;
+		return -EINVAL;
+	}
+#if 0  /*data length is reserved for mode select */
+        mode_length -= buf[1];
+	if (mode_length > 0){
+		/* too many pages i.e. more than 1 */
+		curlun->sense_data = SS_INVALID_PARAMETER ;
+		return -EINVAL;
+	}
+#endif
+	inode = curlun->filp->f_path.dentry->d_inode;
+
+	if (!S_ISBLK(inode->i_mode)) {
+		INFO(fsg,"file not block device: %s\n", curlun->filp->f_path.dentry->d_name.name);
+		goto OUT;
+	}
+
+OUT:
+        /* lets pretend we rounded the passed values to nearest acceptable */
+        curlun->sense_data = SS_ROUNDED_PARAMETER;
+        return -EINVAL;
 }
 
 
@@ -2739,6 +2941,7 @@ static int check_command(struct fsg_dev *fsg, int cmnd_size,
 	/* Conflicting data directions is a phase error */
 	if (fsg->data_dir != data_dir && fsg->data_size_from_cmnd > 0) {
 		fsg->phase_error = 1;
+		INFO(fsg,"cmd:conflict directions - phase error\n");
 		return -EINVAL;
 	}
 
@@ -2764,6 +2967,7 @@ static int check_command(struct fsg_dev *fsg, int cmnd_size,
 			cmnd_size = fsg->cmnd_size;
 		} else {
 			fsg->phase_error = 1;
+			INFO(fsg,"cmd:conflict command size - phase error\n");
 			return -EINVAL;
 		}
 	}
@@ -2812,8 +3016,11 @@ static int check_command(struct fsg_dev *fsg, int cmnd_size,
 	fsg->cmnd[1] &= 0x1f;			// Mask away the LUN
 	for (i = 1; i < cmnd_size; ++i) {
 		if (fsg->cmnd[i] && !(mask & (1 << i))) {
+			char err_str[800];
+			char * str = err_str;
 			if (curlun)
 				curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
+
 			return -EINVAL;
 		}
 	}
@@ -2829,6 +3036,231 @@ static int check_command(struct fsg_dev *fsg, int cmnd_size,
 }
 
 
+/*-------------------------------------------------------------------------*/
+
+static int do_vendor_data_in(struct fsg_dev *fsg)
+{
+	struct lun		*curlun = fsg->curlun;
+	struct fsg_buffhd	*bh;
+	int			rc;
+	u32			amount_left;
+	unsigned int		amount;
+	ssize_t			nread;
+
+	/* Carry out the file reads */
+	amount_left = fsg->data_size_from_cmnd;
+	if (unlikely(amount_left == 0))
+		return -EIO;		// No default reply
+
+	for (;;) {
+
+		/* Figure out how much we need to read:
+		 * Try to read the remaining amount.
+		 * But don't read more than the buffer size.
+		 * And don't try to read past the end of the file.
+		 * Finally, if we're not at a page boundary, don't read past
+		 *	the next page.
+		 * If this means reading 0 then we were asked to read past
+		 *	the end of file. */
+		amount = min((unsigned int) amount_left, mod_data.buflen);
+
+		/* Wait for the next buffer to become available */
+		bh = fsg->next_buffhd_to_fill;
+		while (bh->state != BUF_STATE_EMPTY) {
+			rc = sleep_thread(fsg);
+			if (rc)
+				return rc;
+		}
+
+		/* If we were asked to read past the end of file,
+		 * end with an empty buffer. */
+		if (amount == 0) {
+			curlun->sense_data =
+					SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
+			curlun->sense_data_info = 0;
+			curlun->info_valid = 1;
+			bh->inreq->length = 0;
+			bh->state = BUF_STATE_FULL;
+			break;
+		}
+
+		/* Perform the read */
+		nread = fsg->vendor_cmd->do_vendor_cmd(
+				SCSI_DATA_DIR_TO_HOST, 
+				bh->buf,
+				amount);
+		VLDBG(curlun, "file read %u  -> %d\n", amount,
+				(int) nread);
+		if (signal_pending(current))
+			return -EINTR;
+
+		if (nread < 0) {
+			LDBG(curlun, "error in file read: %d\n",
+					(int) nread);
+			nread = 0;
+		} else if (nread < amount) {
+			LDBG(curlun, "partial file read: %d/%u\n",
+					(int) nread, amount);
+			nread -= (nread & 511);	// Round down to a block
+		}
+		amount_left  -= nread;
+		fsg->residue -= nread;
+		bh->inreq->length = nread;
+		bh->state = BUF_STATE_FULL;
+
+		/* If an error occurred, report it and its position */
+		if (nread < amount) {
+			curlun->sense_data = SS_UNRECOVERED_READ_ERROR;
+			curlun->sense_data_info = 0;
+			curlun->info_valid = 1;
+			break;
+		}
+
+		if (amount_left == 0)
+			break;		// No more left to read
+
+		/* Send this buffer and go read some more */
+		bh->inreq->zero = 0;
+		start_transfer(fsg, fsg->bulk_in, bh->inreq,
+				&bh->inreq_busy, &bh->state);
+		fsg->next_buffhd_to_fill = bh->next;
+	}
+
+	return -EIO;		// No default reply
+}
+
+
+/*-------------------------------------------------------------------------*/
+
+static int do_vendor_data_out(struct fsg_dev *fsg)
+{
+	struct lun		*curlun = fsg->curlun;
+	struct fsg_buffhd	*bh;
+	int			get_some_more;
+	u32			amount_left_to_req, amount_left_to_write;
+	loff_t			usb_offset;
+	unsigned int		amount;
+	unsigned int		partial_page;
+	ssize_t			nwritten;
+	int			rc;
+
+	/* Carry out the data forwarding  */
+	get_some_more = 1;
+	amount_left_to_req = amount_left_to_write = fsg->data_size_from_cmnd;
+   
+	while (amount_left_to_write > 0) {
+
+		/* Queue a request for more data from the host */
+		bh = fsg->next_buffhd_to_fill;
+		if (bh->state == BUF_STATE_EMPTY && get_some_more) {
+			/* Figure out how much we want to get:
+			 * Try to get the remaining amount.
+			 * But don't get more than the buffer size.
+			 * And don't try to go past the end of the file.
+			 * If we're not at a page boundary,
+			 *	don't go past the next page.
+			 * If this means getting 0, then we were asked
+			 *	to write past the end of file.
+			 * Finally, round down to a block boundary. */
+			amount = min(amount_left_to_req, mod_data.buflen);
+			partial_page = usb_offset & (PAGE_CACHE_SIZE - 1);
+			if (partial_page > 0)
+				amount = min(amount,
+	(unsigned int) PAGE_CACHE_SIZE - partial_page);
+
+			if (amount == 0) {
+				get_some_more = 0;
+				curlun->sense_data =
+					SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
+				curlun->sense_data_info = usb_offset >> 9;
+				curlun->info_valid = 1;
+				continue;
+			}
+
+			/* Get the next buffer */
+			usb_offset += amount;
+			fsg->usb_amount_left -= amount;
+			amount_left_to_req -= amount;
+			if (amount_left_to_req == 0)
+				get_some_more = 0;
+
+			bh->outreq->length = bh->bulk_out_intended_length =
+					amount;
+			bh->outreq->short_not_ok = 1;
+			start_transfer(fsg, fsg->bulk_out, bh->outreq,
+					&bh->outreq_busy, &bh->state);
+			fsg->next_buffhd_to_fill = bh->next;
+			continue;
+		}
+
+		/* Write the received data to the backing file */
+		bh = fsg->next_buffhd_to_drain;
+		if (bh->state == BUF_STATE_EMPTY && !get_some_more)
+			break;			// We stopped early
+		if (bh->state == BUF_STATE_FULL) {
+			smp_rmb();
+			fsg->next_buffhd_to_drain = bh->next;
+			bh->state = BUF_STATE_EMPTY;
+
+			/* Did something go wrong with the transfer? */
+			if (bh->outreq->status != 0) {
+				curlun->sense_data = SS_COMMUNICATION_FAILURE;
+				curlun->sense_data_info = 0;
+				curlun->info_valid = 1;
+				break;
+			}
+
+			amount = bh->outreq->actual;
+
+			/* Perform the write */
+			nwritten = fsg->vendor_cmd->do_vendor_cmd(
+				SCSI_DATA_DIR_FROM_HOST, 
+				bh->buf,
+				amount);
+			VLDBG(curlun, "vendor write %u  %d\n", amount,
+					(int) nwritten);
+			if (signal_pending(current))
+				return -EINTR;		// Interrupted!
+
+			if (nwritten < 0) {
+				LDBG(curlun, "error in file write: %d\n",
+						(int) nwritten);
+				nwritten = 0;
+			} else if (nwritten < amount) {
+				LDBG(curlun, "partial file write: %d/%u\n",
+						(int) nwritten, amount);
+				nwritten -= (nwritten & 511);
+						// Round down to a block
+			}
+			amount_left_to_write -= nwritten;
+			fsg->residue -= nwritten;
+
+			/* If an error occurred, report it and its position */
+			if (nwritten < amount) {
+				curlun->sense_data = SS_WRITE_ERROR;
+				curlun->sense_data_info = 0;
+				curlun->info_valid = 1;
+				break;
+			}
+
+			/* Did the host decide to stop early? */
+			if (bh->outreq->actual != bh->outreq->length) {
+				fsg->short_packet_received = 1;
+				break;
+			}
+			continue;
+		}
+
+		/* Wait for something to happen */
+		rc = sleep_thread(fsg);
+		if (rc)
+			return rc;
+	}
+
+	return -EIO;		// No default reply
+}
+
+
 static int do_scsi_command(struct fsg_dev *fsg)
 {
 	struct fsg_buffhd	*bh;
@@ -2836,6 +3268,7 @@ static int do_scsi_command(struct fsg_dev *fsg)
 	int			reply = -EINVAL;
 	int			i;
 	static char		unknown[16];
+	struct lun              *curlun = fsg->curlun;	
 
 	dump_cdb(fsg);
 
@@ -2858,6 +3291,11 @@ static int do_scsi_command(struct fsg_dev *fsg)
 				(1<<4), 0,
 				"INQUIRY")) == 0)
 			reply = do_inquiry(fsg, bh);
+		/* try running as the EVPD enquiry */
+		else if ((reply = check_command(fsg, 6, DATA_DIR_TO_HOST,
+				(1<<1) | (1<<2) | (3<<4), 0,
+				"INQUIRY")) == 0)
+			reply = do_evpd_inquiry(fsg, bh);
 		break;
 
 	case SC_MODE_SELECT_6:
@@ -2865,7 +3303,7 @@ static int do_scsi_command(struct fsg_dev *fsg)
 		if ((reply = check_command(fsg, 6, DATA_DIR_FROM_HOST,
 				(1<<1) | (1<<4), 0,
 				"MODE SELECT(6)")) == 0)
-			reply = do_mode_select(fsg, bh);
+			reply = do_mode_select(fsg);
 		break;
 
 	case SC_MODE_SELECT_10:
@@ -2873,7 +3311,7 @@ static int do_scsi_command(struct fsg_dev *fsg)
 		if ((reply = check_command(fsg, 10, DATA_DIR_FROM_HOST,
 				(1<<1) | (3<<7), 0,
 				"MODE SELECT(10)")) == 0)
-			reply = do_mode_select(fsg, bh);
+			reply = do_mode_select(fsg);
 		break;
 
 	case SC_MODE_SENSE_6:
@@ -2893,11 +3331,16 @@ static int do_scsi_command(struct fsg_dev *fsg)
 		break;
 
 	case SC_PREVENT_ALLOW_MEDIUM_REMOVAL:
+		curlun->sense_data = SS_ILLEGAL_REQUEST;
+		reply = -EINVAL;
+		/*if (!mod_data.cdrom)
+			goto unknown_cmnd;
+
 		fsg->data_size_from_cmnd = 0;
 		if ((reply = check_command(fsg, 6, DATA_DIR_NONE,
 				(1<<4), 0,
 				"PREVENT-ALLOW MEDIUM REMOVAL")) == 0)
-			reply = do_prevent_allow(fsg);
+			reply = do_prevent_allow(fsg);*/
 		break;
 
 	case SC_READ_6:
@@ -2927,6 +3370,15 @@ static int do_scsi_command(struct fsg_dev *fsg)
 			reply = do_read(fsg);
 		break;
 
+	case SC_READ_16:
+		fsg->data_size_from_cmnd =
+			get_unaligned_be32(&fsg->cmnd[10]) << 9;
+		if ((reply = check_command(fsg, 16, DATA_DIR_TO_HOST,
+				(1<<1) | (0xff<<2) | (0xf<<10), 1,
+				"READ(16)")) == 0)
+			reply = do_read(fsg);
+		break;
+
 	case SC_READ_CAPACITY:
 		fsg->data_size_from_cmnd = 8;
 		if ((reply = check_command(fsg, 10, DATA_DIR_TO_HOST,
@@ -2935,32 +3387,51 @@ static int do_scsi_command(struct fsg_dev *fsg)
 			reply = do_read_capacity(fsg, bh);
 		break;
 
+	case SC_READ_CAPACITY_16:
+		fsg->data_size_from_cmnd = 32;
+		/*force no sense data pending to satisfy MS Vista et al systems */
+		//fsg->curlun->unit_attention_data = SS_NO_SENSE;
+		if ((fsg->cmnd[1] != 0x10) || (reply = check_command(fsg, 16, DATA_DIR_TO_HOST,
+				(1<<1) | (0xff<<2) | (0xf<<10) | (1<<14), 1,
+				"READ CAPACITY 16")) == 0)
+			reply = do_read_capacity_16(fsg, bh);
+		break;
+
 	case SC_READ_HEADER:
-		if (!mod_data.cdrom)
+		curlun->sense_data = SS_ILLEGAL_REQUEST;  // jack added
+		reply = -EINVAL;
+/*		if (!mod_data.cdrom)
 			goto unknown_cmnd;
 		fsg->data_size_from_cmnd = get_unaligned_be16(&fsg->cmnd[7]);
 		if ((reply = check_command(fsg, 10, DATA_DIR_TO_HOST,
 				(3<<7) | (0x1f<<1), 1,
 				"READ HEADER")) == 0)
-			reply = do_read_header(fsg, bh);
+			reply = do_read_header(fsg, bh);*/
 		break;
 
 	case SC_READ_TOC:
-		if (!mod_data.cdrom)
+		curlun->sense_data = SS_ILLEGAL_REQUEST;
+		reply = -EINVAL;
+/*		if (!mod_data.cdrom)
 			goto unknown_cmnd;
 		fsg->data_size_from_cmnd = get_unaligned_be16(&fsg->cmnd[7]);
 		if ((reply = check_command(fsg, 10, DATA_DIR_TO_HOST,
 				(7<<6) | (1<<1), 1,
 				"READ TOC")) == 0)
-			reply = do_read_toc(fsg, bh);
+			reply = do_read_toc(fsg, bh);*/
 		break;
 
 	case SC_READ_FORMAT_CAPACITIES:
+		curlun->sense_data = SS_ILLEGAL_REQUEST;
+		reply = -EINVAL;
+/*       	if (!mod_data.cdrom)
+	        	goto unknown_cmnd ;
+
 		fsg->data_size_from_cmnd = get_unaligned_be16(&fsg->cmnd[7]);
 		if ((reply = check_command(fsg, 10, DATA_DIR_TO_HOST,
 				(3<<7), 1,
 				"READ FORMAT CAPACITIES")) == 0)
-			reply = do_read_format_capacities(fsg, bh);
+			reply = do_read_format_capacities(fsg, bh);*/
 		break;
 
 	case SC_REQUEST_SENSE:
@@ -2969,6 +3440,18 @@ static int do_scsi_command(struct fsg_dev *fsg)
 				(1<<4), 0,
 				"REQUEST SENSE")) == 0)
 			reply = do_request_sense(fsg, bh);
+		break;
+
+	case SC_SEEK_6 :/* obsolete command no longer in sbc spec from t10 */
+		fsg->data_size_from_cmnd = 0;
+		reply = check_command(fsg, 6, DATA_DIR_NONE, 1<<1 | (0x3<<2), 1,
+					"SEEK(6)");
+		break;
+
+	case SC_SEEK_10 :
+		fsg->data_size_from_cmnd = 0;
+		reply = check_command(fsg, 10, DATA_DIR_NONE, 1<<1 | (0xf<<2), 1,
+					"SEEK(10)");
 		break;
 
 	case SC_START_STOP_UNIT:
@@ -3004,6 +3487,14 @@ static int do_scsi_command(struct fsg_dev *fsg)
 			reply = do_verify(fsg);
 		break;
 
+	case SC_VERIFY_16 :
+		fsg->data_size_from_cmnd = 0;
+		if ((reply = check_command(fsg, 16, DATA_DIR_NONE,
+				(1<<1) | (0xff<<2) | (0xf<<10), 1,
+				"VERIFY(16)")) == 0)
+			reply = do_verify(fsg);
+		break;
+
 	case SC_WRITE_6:
 		i = fsg->cmnd[4];
 		fsg->data_size_from_cmnd = (i == 0 ? 256 : i) << 9;
@@ -3031,17 +3522,90 @@ static int do_scsi_command(struct fsg_dev *fsg)
 			reply = do_write(fsg);
 		break;
 
+	case SC_WRITE_16:
+		fsg->data_size_from_cmnd =
+				get_unaligned_be32(&fsg->cmnd[10]) << 9;
+		if ((reply = check_command(fsg, 16, DATA_DIR_FROM_HOST,
+				(1<<1) | (0xff<<2) | (0xf<<10), 1,
+				"WRITE(16)")) == 0)
+			reply = do_write(fsg);
+		break;
 	/* Some mandatory commands that we recognize but don't implement.
 	 * They don't mean much in this setting.  It's left as an exercise
 	 * for anyone interested to implement RESERVE and RELEASE in terms
 	 * of Posix locks. */
+	case SC_SEND_DIAGNOSTIC:
+	case SC_RECEIVE_DIAGNOSTIC:
+		curlun->sense_data = SS_INVALID_COMMAND;
+		reply = -EINVAL;
+		break;
+/*     case SC_SEND_DIAGNOSTIC:
+		fsg->data_size_from_cmnd = 0;
+	if ((reply = check_command(fsg, 10, DATA_DIR_NONE, 1<<1 , 1,
+                                    "SEND DIAG"))==0){
+           if (fsg->cmnd[2] & ~(1<<2)) {
+               fsg->curlun->sense_data = SS_INVALID_COMMAND;
+               reply=-EINVAL;
+             }
+             else {
+               fsg->curlun->sense_data = SS_NO_SENSE;
+               reply = 0;
+             }
+         }
+
+         	break;*/
 	case SC_FORMAT_UNIT:
+		fsg->data_size_from_cmnd = 0;
+		if((reply = check_command(fsg, 10, DATA_DIR_NONE, 1<<1, 1,
+                                   "FORM UNT")) == 0) {
+			if (
+	               		(((fsg->cmnd[1] & (3<<3)) == 0) && ((fsg->cmnd[1] & (7<<5)) == 0)) ||
+	               		(((fsg->cmnd[1] & (1<<4)) != 0) && ((fsg->cmnd[1] & (7<<5 | 7)) ==0))
+	               		){
+		             	fsg->curlun->sense_data = SS_NO_SENSE;
+		             	reply = 0;
+	        	} else {
+	               		fsg->curlun->sense_data = SS_INVALID_COMMAND;
+	               		reply=-EINVAL;
+			}
+         	}
+
+		break;
+
 	case SC_RELEASE:
 	case SC_RESERVE:
-	case SC_SEND_DIAGNOSTIC:
 		// Fall through
 
 	default:
+		if (fsg->vendor_cmd) {
+			struct vendor_cmds * vendor=fsg->vendor_cmd;
+			int direction=SCSI_DATA_DIR_UNKNOWN;
+			DBG(fsg, "vendor command detected: 0x%02x, 0x%02x\n",
+				fsg->cmnd[0], fsg->cmnd[1]);
+			
+			fsg->data_size_from_cmnd = vendor->vendor_cmd_data_size(fsg->cmnd, &direction);
+				
+			fsg->residue = fsg->usb_amount_left = fsg->data_size = fsg->data_size_from_cmnd;	
+			
+			if (direction != SCSI_DATA_DIR_UNKNOWN) {
+				/* recognised command so set curlun-sd to no sense data */
+				fsg->curlun->sense_data = SS_NO_SENSE;
+			}
+			if (direction == SCSI_DATA_DIR_FROM_HOST) {
+				reply = do_vendor_data_out(fsg);
+				break;
+			}
+			else if (direction == SCSI_DATA_DIR_TO_HOST) {
+				reply = do_vendor_data_in(fsg);
+				break;
+			}
+			else if (direction == SCSI_DATA_DIR_NONE) {
+				vendor->get_sense_data(&fsg->curlun->sense_data, 
+					&fsg->curlun->sense_data_info);
+				reply = 0;
+				break;
+			}
+		}
  unknown_cmnd:
 		fsg->data_size_from_cmnd = 0;
 		sprintf(unknown, "Unknown x%02x", fsg->cmnd[0]);
@@ -3316,7 +3880,8 @@ reset:
 
 	fsg->running = 1;
 	for (i = 0; i < fsg->nluns; ++i)
-		fsg->luns[i].unit_attention_data = SS_RESET_OCCURRED;
+//		fsg->luns[i].unit_attention_data = SS_RESET_OCCURRED;
+		fsg->luns[i].unit_attention_data = SS_NO_SENSE;
 	return rc;
 }
 
@@ -3817,6 +4382,7 @@ static void /* __init_or_exit */ fsg_unbind(struct usb_gadget *gadget)
 	struct usb_request	*req = fsg->ep0req;
 
 	DBG(fsg, "unbind\n");
+
 	clear_bit(REGISTERED, &fsg->atomic_bitflags);
 
 	/* Unregister the sysfs attribute files and the LUNs */
@@ -3943,6 +4509,7 @@ static int __init check_parameters(struct fsg_dev *fsg)
 }
 
 
+
 static int __init fsg_bind(struct usb_gadget *gadget)
 {
 	struct fsg_dev		*fsg = the_fsg;
@@ -3952,7 +4519,7 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 	struct usb_ep		*ep;
 	struct usb_request	*req;
 	char			*pathbuf, *p;
-
+	
 	fsg->gadget = gadget;
 	set_gadget_data(gadget, fsg);
 	fsg->ep0 = gadget->ep0;
@@ -4159,6 +4726,7 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 	DBG(fsg, "I/O thread pid: %d\n", task_pid_nr(fsg->thread_task));
 
 	set_bit(REGISTERED, &fsg->atomic_bitflags);
+	
 
 	/* Tell the thread to start working */
 	wake_up_process(fsg->thread_task);
@@ -4237,6 +4805,16 @@ static int __init fsg_alloc(void)
 	return 0;
 }
 
+void unregister_vendor_handler(void) {
+	the_fsg ->vendor_cmd=NULL;
+}
+EXPORT_SYMBOL(unregister_vendor_handler);
+
+int register_vendor_handler(struct vendor_cmds *handler) {
+	the_fsg->vendor_cmd=handler;
+	return 0;
+}
+EXPORT_SYMBOL(register_vendor_handler);
 
 static int __init fsg_init(void)
 {
@@ -4267,3 +4845,7 @@ static void __exit fsg_cleanup(void)
 	kref_put(&fsg->ref, fsg_release);
 }
 module_exit(fsg_cleanup);
+
+
+
+

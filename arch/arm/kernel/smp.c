@@ -400,7 +400,6 @@ static void ipi_timer(void)
 	irq_exit();
 }
 
-#ifdef CONFIG_LOCAL_TIMERS
 asmlinkage void __exception do_local_timer(struct pt_regs *regs)
 {
 	struct pt_regs *old_regs = set_irq_regs(regs);
@@ -413,7 +412,6 @@ asmlinkage void __exception do_local_timer(struct pt_regs *regs)
 
 	set_irq_regs(old_regs);
 }
-#endif
 
 #ifdef CONFIG_GENERIC_CLOCKEVENTS_BROADCAST
 static void smp_timer_broadcast(const struct cpumask *mask)
@@ -547,6 +545,14 @@ void smp_send_reschedule(int cpu)
 	send_ipi_message(cpumask_of(cpu), IPI_RESCHEDULE);
 }
 
+/* Added from 2.6.24 to make 820 build for SMP */
+void smp_send_timer(void)
+{
+	cpumask_t mask = cpu_online_map;
+	cpu_clear(smp_processor_id(), mask);
+	send_ipi_message(&mask, IPI_TIMER);
+}
+
 void smp_send_stop(void)
 {
 	cpumask_t mask = cpu_online_map;
@@ -580,6 +586,8 @@ on_each_cpu_mask(void (*func)(void *), void *info, int wait,
 /*
  * TLB operations
  */
+#if !defined(CONFIG_ARCH_OX820) || !defined(CONFIG_SMP)
+
 struct tlb_args {
 	struct vm_area_struct *ta_vma;
 	unsigned long ta_start;
@@ -692,3 +700,4 @@ void flush_tlb_kernel_range(unsigned long start, unsigned long end)
 	} else
 		local_flush_tlb_kernel_range(start, end);
 }
+#endif // !defined(CONFIG_ARCH_OX820) || !defined(CONFIG_SMP)

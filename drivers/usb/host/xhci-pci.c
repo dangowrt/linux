@@ -53,6 +53,12 @@ static int xhci_pci_setup(struct usb_hcd *hcd)
 	struct xhci_hcd		*xhci = hcd_to_xhci(hcd);
 	struct pci_dev		*pdev = to_pci_dev(hcd->self.controller);
 	int			retval;
+//	u32			temp;
+//
+//	/* Set Max Read Request Size to 128 bytes */
+//	pci_read_config_dword(pdev, 0xa8, &temp);
+//	temp &= ~0x00007000;
+//	pci_write_config_dword(pdev, 0xa8, temp);
 
 	xhci->cap_regs = hcd->regs;
 	xhci->op_regs = hcd->regs +
@@ -99,6 +105,14 @@ static int xhci_pci_setup(struct usb_hcd *hcd)
 
 	/* Find any debug ports */
 	return xhci_pci_reinit(xhci, pdev);
+}
+
+static int xhci_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
+{
+	if (dev->vendor == 0x1b6f)
+		return -ENODEV;
+
+	return usb_hcd_pci_probe(dev, id);
 }
 
 static const struct hc_driver xhci_pci_hc_driver = {
@@ -162,7 +176,8 @@ static struct pci_driver xhci_pci_driver = {
 	.name =		(char *) hcd_name,
 	.id_table =	pci_ids,
 
-	.probe =	usb_hcd_pci_probe,
+//	.probe =	usb_hcd_pci_probe,
+	.probe =	xhci_pci_probe,
 	.remove =	usb_hcd_pci_remove,
 	/* suspend and resume implemented later */
 

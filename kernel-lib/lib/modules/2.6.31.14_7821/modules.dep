@@ -1,0 +1,11 @@
+/lib/modules/2.6.31.14_7821/kernel/drivers/scsi/scsi_wait_scan.ko:
+/lib/modules/2.6.31.14_7821/kernel/drivers/net/gmac/gmac.ko: /lib/modules/2.6.31.14_7821/kernel/drivers/net/mii.ko
+/lib/modules/2.6.31.14_7821/kernel/drivers/net/mii.ko:
+/lib/modules/2.6.31.14_7821/kernel/drivers/net/wireless/ath/ath.ko:
+/lib/modules/2.6.31.14_7821/kernel/drivers/net/wireless/ath/ath9k/ath9k.ko: /lib/modules/2.6.31.14_7821/kernel/drivers/leds/led-class.ko /lib/modules/2.6.31.14_7821/kernel/drivers/net/wireless/ath/ath.ko
+/lib/modules/2.6.31.14_7821/kernel/drivers/leds/led-class.ko:
+/lib/modules/2.6.31.14_7821/kernel/drivers/usb/host/etxhci-hcd.ko: /lib/modules/2.6.31.14_7821/kernel/drivers/usb/core/usbcore.ko
+/lib/modules/2.6.31.14_7821/kernel/drivers/usb/host/ehci-hcd.ko: /lib/modules/2.6.31.14_7821/kernel/drivers/usb/core/usbcore.ko
+/lib/modules/2.6.31.14_7821/kernel/drivers/usb/core/usbcore.ko:
+/lib/modules/2.6.31.14_7821/kernel/drivers/usb/storage/usb-storage.ko: /lib/modules/2.6.31.14_7821/kernel/drivers/usb/core/usbcore.ko
+/lib/modules/2.6.31.14_7821/kernel/drivers/usb/class/usblp.ko: /lib/modules/2.6.31.14_7821/kernel/drivers/usb/core/usbcore.ko

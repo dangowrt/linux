@@ -1320,6 +1320,11 @@ int usb_set_interface(struct usb_device *dev, int interface, int alternate)
 	unsigned int epaddr;
 	unsigned int pipe;
 
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(dev))
+		return etapi_usb_set_interface(dev, interface, alternate);
+#endif
+
 	if (dev->state == USB_STATE_SUSPENDED)
 		return -EHOSTUNREACH;
 
@@ -1435,6 +1440,11 @@ int usb_reset_configuration(struct usb_device *dev)
 {
 	int			i, retval;
 	struct usb_host_config	*config;
+
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(dev))
+		return etapi_usb_reset_configuration(dev);
+#endif
 
 	if (dev->state == USB_STATE_SUSPENDED)
 		return -EHOSTUNREACH;
@@ -1665,6 +1675,11 @@ int usb_set_configuration(struct usb_device *dev, int configuration)
 	struct usb_host_config *cp = NULL;
 	struct usb_interface **new_interfaces = NULL;
 	int n, nintf;
+
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(dev))	
+		return etapi_usb_set_configuration(dev, configuration);
+#endif
 
 	if (dev->authorized == 0 || configuration == -1)
 		configuration = 0;
@@ -1909,6 +1924,11 @@ static void cancel_async_set_config(struct usb_device *udev)
 int usb_driver_set_configuration(struct usb_device *udev, int config)
 {
 	struct set_config_request *req;
+
+#if defined(CONFIG_USB_ETRON_HUB)
+	if (usb_is_etron_hcd(udev))
+		return etapi_usb_driver_set_configuration(udev, config);
+#endif
 
 	req = kmalloc(sizeof(*req), GFP_KERNEL);
 	if (!req)

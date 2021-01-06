@@ -154,8 +154,13 @@ static inline int fat_mode_can_hold_ro(struct inode *inode)
 static inline mode_t fat_make_mode(struct msdos_sb_info *sbi,
 				   u8 attrs, mode_t mode)
 {
+	// -> [J.Chiang], 2010/10/26 - Try to support vFAT's file size larger than 4GB, skip checking RO
+	#ifndef CONFIG_FAT32_OVER4GB	
 	if (attrs & ATTR_RO && !((attrs & ATTR_DIR) && !sbi->options.rodir))
 		mode &= ~S_IWUGO;
+
+	#endif
+	// <- End.
 
 	if (attrs & ATTR_DIR)
 		return (mode & ~sbi->options.fs_dmask) | S_IFDIR;

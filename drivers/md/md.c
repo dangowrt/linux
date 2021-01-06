@@ -53,6 +53,20 @@
 #define DEBUG 0
 #define dprintk(x...) ((void)(DEBUG && printk(x)))
 
+ 
+// -> [Teresa Chiu] 04/24/2008, flag for creating/managing raid array
+static int newRaidFlag;
+	
+static inline void setNewRAIDFlag(int flag)
+{
+	newRaidFlag=flag;
+}
+
+static inline int getNewRAIDFlag(void)
+{
+	return(newRaidFlag);
+}
+// <- end
 
 #ifndef MODULE
 static void autostart_arrays(int part);
@@ -1187,7 +1201,7 @@ static int super_1_load(mdk_rdev_t *rdev, mdk_rdev_t *refdev, int minor_version)
 		       bdevname(rdev->bdev,b));
 		return -EINVAL;
 	}
-
+	
 	rdev->preferred_minor = 0xffff;
 	rdev->data_offset = le64_to_cpu(sb->data_offset);
 	atomic_set(&rdev->corrected_errors, le32_to_cpu(sb->cnt_corrected_read));
@@ -5346,6 +5360,22 @@ static int md_ioctl(struct block_device *bdev, fmode_t mode,
 
 	switch (cmd)
 	{
+		// -> [Teresa Chiu] 04/24/2008, set/clear flag for new/existing raid array
+		case CREATE_NEW_RAID:
+			{
+				printk(KERN_INFO 
+					"md: ioctl CREATE_NEW_RAID, array %s \n", mdname(mddev));
+				setNewRAIDFlag(1);
+			}
+			goto done_unlock;
+		case MANAGE_EXIST_RAID:
+			{
+				printk(KERN_INFO 
+					"md: ioctl MANAGE_EXIST_RAID, array %s \n", mdname(mddev));
+				setNewRAIDFlag(0);
+			}
+			goto done_unlock;			
+		// <- end
 		case SET_ARRAY_INFO:
 			{
 				mdu_array_info_t info;
@@ -5725,7 +5755,24 @@ static void status_resync(struct seq_file *seq, mddev_t * mddev)
 		max_sectors = mddev->resync_max_sectors;
 	else
 		max_sectors = mddev->dev_sectors;
+	
+	// -> [Teresa chiu] 04/24/2008	
+	//printk(KERN_INFO "md: status_sync, mddev->resync_max_sectors=%llu, mddev->size=%llu \n", 
+	//		(unsigned long long) mddev->resync_max_sectors,
+	//		(unsigned long long)mddev->size);
+	//printk(KERN_INFO "md: status_sync, max_blocks=%llu \n", (unsigned long long) max_blocks);
 
+	if (getNewRAIDFlag())
+	{	
+		if ((strcmp(mdname(mddev), "md1")==0) && (max_sectors > (unsigned long long)20971520)) //4194304)
+		{
+			max_sectors = (unsigned long long) 20971520;  ////4194304;   // 1GB, is equal to 2097152sectors=1048576blocks
+			printk(KERN_INFO "md: status_sync, try to change total sync blocks to 1GB size, so max_sectors=%llu\n", 
+					(unsigned long long)max_sectors);
+		}
+	}
+	// <- end		
+		
 	/*
 	 * Should not happen.
 	 */

@@ -335,6 +335,11 @@ static int fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de)
 {
 	struct msdos_sb_info *sbi = MSDOS_SB(inode->i_sb);
 	int error;
+	// -> [J.Chiang], 2010/10/26 - Try to support vFAT's file size larger than 4GB
+	#ifdef CONFIG_FAT32_OVER4GB
+	unsigned long long	fileSize=0;
+	#endif
+	// <- End.
 
 	MSDOS_I(inode)->i_pos = 0;
 	inode->i_uid = sbi->options.fs_uid;
@@ -369,7 +374,25 @@ static int fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de)
 			MSDOS_I(inode)->i_start |= (le16_to_cpu(de->starthi) << 16);
 
 		MSDOS_I(inode)->i_logstart = MSDOS_I(inode)->i_start;
+		// -> [J.Chiang], 2010/10/26 - Try to support vFAT's file size larger than 4GB
+		#ifdef CONFIG_FAT32_OVER4GB
+		//inode->i_size = le32_to_cpu(de->size);
+		//if (( de->ctime_cs != 0 ) && ( de->attr == 0x23)) {
+		if (( de->ctime_cs != 0 ) && (( de->attr & 0xa8) == 0xa8) ) {
+			fileSize = (unsigned long long) de->ctime_cs;
+			fileSize = (unsigned long long) ((fileSize << 32) | le32_to_cpu(de->size));
+			inode->i_size = fileSize;
+		} else {
+			inode->i_size = le32_to_cpu(de->size);
+		}
+		// *** Debug ***
+		//printk("fat_fill_inode: ctime_cs=%x, attr=%x, de->size=%x\n", de->ctime_cs, de->attr, de->size);
+		//printk("                inode->i_size=%llx, fileSize=%llx...\n", inode->i_size, fileSize);
+		//printk("				inode->i_mode=0x%x\n", inode->i_mode);
+		#else
 		inode->i_size = le32_to_cpu(de->size);
+		#endif
+		// <- End.
 		inode->i_op = &fat_file_inode_operations;
 		inode->i_fop = &fat_file_operations;
 		inode->i_mapping->a_ops = &fat_aops;
@@ -385,11 +408,15 @@ static int fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de)
 			   & ~((loff_t)sbi->cluster_size - 1)) >> 9;
 
 	fat_time_fat2unix(sbi, &inode->i_mtime, de->time, de->date, 0);
+	// -> [J.Chiang], 2010/10/26 - Try to support vFAT's file size larger than 4GB
+	#ifndef CONFIG_FAT32_OVER4GB
 	if (sbi->options.isvfat) {
 		fat_time_fat2unix(sbi, &inode->i_ctime, de->ctime,
 				  de->cdate, de->ctime_cs);
 		fat_time_fat2unix(sbi, &inode->i_atime, 0, de->adate, 0);
 	} else
+	#endif
+	// <- End.
 		inode->i_ctime = inode->i_atime = inode->i_mtime;
 
 	return 0;
@@ -589,6 +616,13 @@ static int fat_write_inode(struct inode *inode, int wait)
 	struct msdos_dir_entry *raw_entry;
 	loff_t i_pos;
 	int err;
+	// -> [J.Chiang], 2010/10/26 - Try to support vFAT's file size larger than 4GB
+	#ifdef CONFIG_FAT32_OVER4GB
+	unsigned int	upperByte=0;
+	unsigned long	lowerDword=0;
+	unsigned long long	fileSize=0;
+	#endif
+	// <- End.
 
 	if (inode->i_ino == MSDOS_ROOT_INO)
 		return 0;
@@ -616,16 +650,48 @@ retry:
 	if (S_ISDIR(inode->i_mode))
 		raw_entry->size = 0;
 	else
+	// -> [J.Chiang], 2010/10/26 - Try to support vFAT's file size larger than 4GB
+	#ifdef CONFIG_FAT32_OVER4GB
+		//raw_entry->size = cpu_to_le32(inode->i_size);
+	{
+		fileSize = cpu_to_le64(inode->i_size);
+		if (fileSize & (unsigned long long) 0xff00000000 ) {
+			lowerDword = (unsigned long) (fileSize & 0xffffffff);
+			upperByte = (unsigned int) (fileSize >> 32);
+			raw_entry->size = lowerDword;
+			raw_entry->ctime_cs = upperByte;
+		} else {
+			raw_entry->size = fileSize;
+		}
+	}
+	//raw_entry->attr = fat_make_attrs(inode);
+	if ((upperByte != 0) && (fileSize != 0))
+		//raw_entry->attr = fat_make_attrs(inode) | ATTR_RO | ATTR_HIDDEN;
+		raw_entry->attr = fat_make_attrs(inode) | ATTR_RO | ATTR_HIDDEN  | ATTR_BIGFILE;
+	else
+		raw_entry->attr = fat_make_attrs(inode);
+	// *** Debug ***
+	//printk("fat_write_inode: filesize=%llx, upperByte=%x, attr=%x...\n", fileSize, upperByte, raw_entry->attr);
+	#else
 		raw_entry->size = cpu_to_le32(inode->i_size);
 	raw_entry->attr = fat_make_attrs(inode);
+	#endif
+	// <- End.
 	raw_entry->start = cpu_to_le16(MSDOS_I(inode)->i_logstart);
 	raw_entry->starthi = cpu_to_le16(MSDOS_I(inode)->i_logstart >> 16);
 	fat_time_unix2fat(sbi, &inode->i_mtime, &raw_entry->time,
 			  &raw_entry->date, NULL);
 	if (sbi->options.isvfat) {
 		__le16 atime;
+		// -> [J.Chiang], 2010/10/26 - Try to support vFAT's file size larger than 4GB
+		#ifdef CONFIG_FAT32_OVER4GB
+		fat_time_unix2fat(sbi, &inode->i_ctime, &raw_entry->ctime,
+				  &raw_entry->cdate, NULL);
+		#else
 		fat_time_unix2fat(sbi, &inode->i_ctime, &raw_entry->ctime,
 				  &raw_entry->cdate, &raw_entry->ctime_cs);
+		#endif
+		// <- End.
 		fat_time_unix2fat(sbi, &inode->i_atime, &atime,
 				  &raw_entry->adate, NULL);
 	}
@@ -1346,7 +1412,13 @@ int fat_fill_super(struct super_block *sb, void *data, int silent,
 		sbi->fat_length = le32_to_cpu(b->fat32_length);
 		sbi->root_cluster = le32_to_cpu(b->root_cluster);
 
+		// -> [J.Chiang], 2010/10/26 - Try to support vFAT's file size larger than 4GB
+		#ifdef CONFIG_FAT32_OVER4GB
+		sb->s_maxbytes = (unsigned long long) 0xffffffffff;
+		#else
 		sb->s_maxbytes = 0xffffffff;
+		#endif
+		// <- End.
 
 		/* MC - if info_sector is 0, don't multiply by 0 */
 		sbi->fsinfo_sector = le16_to_cpu(b->info_sector);

@@ -18,7 +18,19 @@
 #include <linux/bcd.h>
 #include <linux/rtc.h>
 
-#define DRV_VERSION "0.4.3"
+//#define DEBUG	1
+// -> [J.Chiang], 2009/03/03 - I moved this driver from linux kernel 2.6.28.6, to let PCF8563 driver uses "probe"
+//	function, only this way can be used by OXE810's I2C adapter driver. And added a variable for initialized
+//	usage.
+//#define DRV_VERSION "0.4.3"
+#include <mach/hardware.h>
+#include <linux/io.h>
+
+#define DRV_VERSION "0.4.2.5"
+int	reset_ok = 0;
+
+extern int sys_ready;
+// <- End.
 
 #define PCF8563_REG_ST1		0x00 /* status */
 #define PCF8563_REG_ST2		0x01
@@ -104,6 +116,11 @@ static int pcf8563_get_datetime(struct i2c_client *client, struct rtc_time *tm)
 	tm->tm_wday = buf[PCF8563_REG_DW] & 0x07;
 	tm->tm_mon = bcd2bin(buf[PCF8563_REG_MO] & 0x1F) - 1; /* rtc mn 1-12 */
 	tm->tm_year = bcd2bin(buf[PCF8563_REG_YR]);
+
+	// -> [J.Chiang], 2009/03/04 - Modified for checking date-time is valid or not.
+	if ( (buf[0] & 0x08) == 0x08)
+		return 1;
+	// <- End.
 	if (tm->tm_year < 70)
 		tm->tm_year += 100;	/* assume we are in 1970...2069 */
 	/* detect the polarity heuristically. see note above. */
@@ -130,12 +147,74 @@ static int pcf8563_set_datetime(struct i2c_client *client, struct rtc_time *tm)
 	struct pcf8563 *pcf8563 = i2c_get_clientdata(client);
 	int i, err;
 	unsigned char buf[9];
+	unsigned char init_buf[14];
 
-	dev_dbg(&client->dev, "%s: secs=%d, mins=%d, hours=%d, "
+	  dev_dbg(&client->dev, "%s: secs=%d, mins=%d, hours=%d, "
 		"mday=%d, mon=%d, year=%d, wday=%d\n",
 		__func__,
 		tm->tm_sec, tm->tm_min, tm->tm_hour,
 		tm->tm_mday, tm->tm_mon, tm->tm_year, tm->tm_wday);
+
+	// -> [J.Chiang], 2009/03/04 - Added for initialized pcf8563
+	if ( reset_ok == 0 )
+	{
+		printk ("reset pcf8563...\n");
+		init_buf[PCF8563_REG_ST1] = 0x0;
+		init_buf[PCF8563_REG_CLKO] = 0x0;
+		init_buf[PCF8563_REG_TMRC] = 0x03;
+		init_buf[PCF8563_REG_ST2] = 0x0c;
+
+		/* hours, minutes and seconds */
+		init_buf[PCF8563_REG_SC] = bin2bcd(tm->tm_sec);
+		init_buf[PCF8563_REG_MN] = bin2bcd(tm->tm_min);
+		init_buf[PCF8563_REG_HR] = bin2bcd(tm->tm_hour);
+
+		init_buf[PCF8563_REG_DM] = bin2bcd(tm->tm_mday);
+
+		/* month, 1 - 12 */
+		init_buf[PCF8563_REG_MO] = bin2bcd(tm->tm_mon + 1);
+
+		/* year and century */
+		init_buf[PCF8563_REG_YR] = bin2bcd(tm->tm_year % 100);
+		if (pcf8563->c_polarity ? (tm->tm_year >= 100) : (tm->tm_year < 100))
+			init_buf[PCF8563_REG_MO] |= PCF8563_MO_C;
+
+		init_buf[PCF8563_REG_DW] = tm->tm_wday & 0x07;
+
+		/* write register's data */
+		for (i = 0; i < 14; i++) {
+			unsigned char data[2] = { PCF8563_REG_ST1 + i,
+						init_buf[PCF8563_REG_ST1 + i] };
+
+			err = i2c_master_send(client, data, sizeof(data));
+			if (err != sizeof(data)) {
+				dev_err(&client->dev,
+				"%s: err=%d addr=%02x, data=%02x\n",
+				__func__, err, data[0], data[1]);
+				return -EIO;
+			}
+		};
+
+		return 0;
+	}
+
+	if ((tm->tm_year == 70) && (tm->tm_mon == 0) && (tm->tm_mday == 1) && (tm->tm_hour == 12)
+		&& (tm->tm_min == 34) && (tm->tm_sec == 0) && (tm->tm_wday == 4))
+	{
+		printk ("System is ready~\n");
+		sys_ready=1;
+		return 0;
+	}
+
+	if ((tm->tm_year == 70) && (tm->tm_mon == 0) && (tm->tm_mday == 1) && (tm->tm_hour == 12)
+		&& (tm->tm_min == 34) && (tm->tm_sec == 56) && (tm->tm_wday == 4))
+	{
+		printk ("System is busy~\n");
+		sys_ready=0;
+		return 0;
+	}
+
+	// <- End.
 
 	/* hours, minutes and seconds */
 	buf[PCF8563_REG_SC] = bin2bcd(tm->tm_sec);
@@ -222,6 +301,25 @@ static int pcf8563_probe(struct i2c_client *client,
 
 	i2c_set_clientdata(client, pcf8563);
 
+	// -> [J.Chiang], 2009/03/04 - Added to check the if pcf8563 has not been initialized, do it.
+
+	struct rtc_time tm;
+
+	dev_info(&client->dev, "get date/time...\n");
+
+	//printk("pcf8563_get_datetime is %d",pcf8563_get_datetime (client, &tm));
+
+	if (pcf8563_get_datetime (client, &tm))
+	{
+		//time = 1230768000;			// Set to 2009/01/01
+		int const year= 2012;
+		u32 const time = ( 60*60*24*365*(year-1970) )+ ( 60*60*24*((year-1968)/4) );
+		rtc_time_to_tm(time, &tm);
+		pcf8563_set_datetime (client, &tm);
+		dev_info (&client->dev,"date/time invailid, reset to %d/01/01...\n", year);
+	}
+	reset_ok = 1;
+	// <- End.
 	return 0;
 
 exit_kfree:

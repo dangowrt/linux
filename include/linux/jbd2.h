@@ -1113,6 +1113,7 @@ extern handle_t *jbd2_journal_start(journal_t *, int nblocks);
 extern int	 jbd2_journal_restart (handle_t *, int nblocks);
 extern int	 jbd2_journal_extend (handle_t *, int nblocks);
 extern int	 jbd2_journal_get_write_access(handle_t *, struct buffer_head *);
+extern int	 jbd2_journal_get_data_write_access(handle_t *, struct buffer_head *);
 extern int	 jbd2_journal_get_create_access (handle_t *, struct buffer_head *);
 extern int	 jbd2_journal_get_undo_access(handle_t *, struct buffer_head *);
 void		 jbd2_journal_set_triggers(struct buffer_head *,

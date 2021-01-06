@@ -97,6 +97,13 @@ void arm_machine_restart(char mode, const char *cmd)
 	 */
 	setup_mm_for_reboot(mode);
 
+
+	// -> [Walker Chen], 2010/08/09 - Added HW-reset function
+	printk("do HW-reset~\n");
+	*(volatile u32*)GPIO_A_OUTPUT_ENABLE 	|= 	(1UL << 25 );	// Set G25 as output
+	*(volatile u32*)GPIO_A_OUTPUT_VALUE 	&= ~(1UL << 25 );	// Set G25 to be low
+	// <- End.
+
 	/*
 	 * Now call the architecture specific reboot code.
 	 */
@@ -192,6 +199,7 @@ __setup("reboot=", reboot_setup);
 
 void machine_halt(void)
 {
+	pm_power_off();
 }
 
 

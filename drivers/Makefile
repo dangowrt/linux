@@ -110,3 +110,5 @@ obj-$(CONFIG_VLYNQ)		+= vlynq/
 obj-$(CONFIG_STAGING)		+= staging/
 obj-y				+= platform/
 obj-y				+= ieee802154/
+obj-$(CONFIG_LIO_TARGET)	+= lio-core/
+obj-$(CONFIG_LIO_TARGET)	+= target/

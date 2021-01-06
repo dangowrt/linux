@@ -4,6 +4,33 @@
 comment "USB Host Controller Drivers"
 	depends on USB
 
+config USB_ETRON_HCD
+	tristate "Etron HCD support"
+	depends on USB && PCI
+	help
+	  The Etron EJ168A chip is USB 3.0 host controller.
+
+	  Enable this option to support this chip in host controller mode.
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called etxhci-hcd.
+	  
+config USB_ETRON_HCD_DEBUGGING
+	bool "Debugging for the Etron host controller"
+	depends on USB_ETRON_HCD
+	---help---
+	  Say 'Y' to turn on debugging for the Etron host controller driver.
+	  This will spew debugging output, even in interrupt context.
+	  This should only be used for debugging Etron host driver bugs.
+
+	  If unsure, say N.
+
+config USB_ETRON_HUB
+	bool
+	depends on USB_ETRON_HCD
+	default y
+
 config USB_C67X00_HCD
 	tristate "Cypress C67x00 HCD support"
 	depends on USB
@@ -62,6 +89,7 @@ config USB_EHCI_HCD
 config USB_EHCI_ROOT_HUB_TT
 	bool "Root Hub Transaction Translators"
 	depends on USB_EHCI_HCD
+	default y if ARCH_OX820
 	---help---
 	  Some EHCI chips have vendor-specific extensions to integrate
 	  transaction translators, so that no OHCI or UHCI companion

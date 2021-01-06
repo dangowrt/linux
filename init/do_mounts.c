@@ -24,6 +24,11 @@
 
 int __initdata rd_doload;	/* 1 = load RAM disk, 0 = don't load */
 
+// -> [Walker Chen], 2010/08/04 - ubi debug
+int sys_is_ubifs=0;
+EXPORT_SYMBOL(sys_is_ubifs);
+// <- End.
+
 int root_mountflags = MS_RDONLY | MS_SILENT;
 static char * __initdata root_device_name;
 static char __initdata saved_root_name[64];
@@ -286,7 +291,7 @@ retry:
 out:
 	putname(fs_names);
 }
- 
+
 #ifdef CONFIG_ROOT_NFS
 static int __init mount_nfs_root(void)
 {
@@ -385,11 +390,26 @@ void __init prepare_namespace(void)
 
 	if (saved_root_name[0]) {
 		root_device_name = saved_root_name;
+		// -> [Walker Chen], 2010/7/19 - let MTD and UBI filevsystem run INITRD function
+		/*
 		if (!strncmp(root_device_name, "mtd", 3) ||
 		    !strncmp(root_device_name, "ubi", 3)) {
 			mount_block_root(root_device_name, root_mountflags);
 			goto out;
 		}
+		*/
+		if (!strncmp(root_device_name, "mtd", 3) ||
+		    !strncmp(root_device_name, "ubi", 3)) {
+		  sys_is_ubifs=1;
+		  char *ubi_root_fs_names = root_fs_names; 	//save file system names for ubifs
+		  root_fs_names=NULL;												// clear root file system for initrd
+			initrd_load();														// run initrd
+			root_fs_names=ubi_root_fs_names; 					// restore file system names for ubifs
+			//printk("do_mount: ubi_root_fs_names = %s \n",root_fs_names);
+			mount_block_root(root_device_name, root_mountflags);
+			goto out;
+		}
+		// <- End.
 		ROOT_DEV = name_to_dev_t(root_device_name);
 		if (strncmp(root_device_name, "/dev/", 5) == 0)
 			root_device_name += 5;

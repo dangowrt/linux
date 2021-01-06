@@ -10,6 +10,9 @@
 #include <linux/fs.h>
 #include <linux/buffer_head.h>
 #include "fat.h"
+// -> [J.Chiang], 2011/06/15
+#include <linux/time.h>
+// <- End.
 
 /*
  * fat_fs_error reports a file system problem that might indicate fa data
@@ -195,8 +198,15 @@ void fat_time_fat2unix(struct msdos_sb_info *sbi, struct timespec *ts,
 		   + days_in_year[month] + day
 		   + DAYS_DELTA) * SECS_PER_DAY;
 
+	// -> [J.Chiang], 2011/06/15
+	//if (!sbi->options.tz_utc)
+	//	second += sys_tz.tz_minuteswest * SECS_PER_MIN;
 	if (!sbi->options.tz_utc)
-		second += sys_tz.tz_minuteswest * SECS_PER_MIN;
+	{
+		second -= sys_tz.tz_minuteswest * SECS_PER_MIN;
+		//printk ("not UTC, Greenwich time=%x\n", sys_tz.tz_minuteswest);
+	}
+	// <- End.
 
 	if (time_cs) {
 		ts->tv_sec = second + (time_cs / 100);
@@ -214,23 +224,44 @@ void fat_time_unix2fat(struct msdos_sb_info *sbi, struct timespec *ts,
 	time_t second = ts->tv_sec;
 	time_t day, leap_day, month, year;
 
+	// -> [J.Chiang], 2011/06/15 
+	//if (!sbi->options.tz_utc)
+	//	second -= sys_tz.tz_minuteswest * SECS_PER_MIN;
 	if (!sbi->options.tz_utc)
-		second -= sys_tz.tz_minuteswest * SECS_PER_MIN;
+	{
+		second += sys_tz.tz_minuteswest * SECS_PER_MIN;
+		//printk ("not UTC, Greenwich time=%d\n", sys_tz.tz_minuteswest);
+	}
+	// <- End.
 
 	/* Jan 1 GMT 00:00:00 1980. But what about another time zone? */
 	if (second < UNIX_SECS_1980) {
 		*time = 0;
 		*date = cpu_to_le16((0 << 9) | (1 << 5) | 1);
+		// -> [J.Chiang], 2010/10/26 - Try to support vFAT's file size larger than 4GB
+		#ifdef CONFIG_FAT32_OVER4GB	
+		//if (time_cs)
+		//	*time_cs = 0;
+		#else
 		if (time_cs)
 			*time_cs = 0;
+		#endif
+		// <- End.
 		return;
 	}
 #if BITS_PER_LONG == 64
 	if (second >= UNIX_SECS_2108) {
 		*time = cpu_to_le16((23 << 11) | (59 << 5) | 29);
 		*date = cpu_to_le16((127 << 9) | (12 << 5) | 31);
+		// -> [J.Chiang], 2010/10/26 - Try to support vFAT's file size larger than 4GB
+		#ifdef CONFIG_FAT32_OVER4GB	
+		//if (time_cs)
+		//	*time_cs = 199;
+		#else
 		if (time_cs)
 			*time_cs = 199;
+		#endif
+		// <- End.
 		return;
 	}
 #endif
@@ -263,8 +294,15 @@ void fat_time_unix2fat(struct msdos_sb_info *sbi, struct timespec *ts,
 			    | ((second / SECS_PER_MIN) % 60) << 5
 			    | (second % SECS_PER_MIN) >> 1);
 	*date = cpu_to_le16((year << 9) | (month << 5) | (day + 1));
+	// -> [J.Chiang], 2010/10/26 - Try to support vFAT's file size larger than 4GB
+	#ifdef CONFIG_FAT32_OVER4GB	
+	//if (time_cs)
+	//	*time_cs = (ts->tv_sec & 1) * 100 + ts->tv_nsec / 10000000;
+	#else
 	if (time_cs)
 		*time_cs = (ts->tv_sec & 1) * 100 + ts->tv_nsec / 10000000;
+	#endif
+	// <- End.
 }
 EXPORT_SYMBOL_GPL(fat_time_unix2fat);
 

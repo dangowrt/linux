@@ -14,6 +14,10 @@ ifeq ($(CONFIG_USB_DEVICEFS),y)
 	usbcore-objs	+= inode.o
 endif
 
+ifeq ($(CONFIG_USB_ETRON_HUB),y)
+	usbcore-objs	+= ethub.o etapi.o
+endif
+
 obj-$(CONFIG_USB)	+= usbcore.o
 
 ifeq ($(CONFIG_USB_DEBUG),y)

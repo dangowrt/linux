@@ -654,7 +654,11 @@ shortname:
 	fat_time_unix2fat(sbi, ts, &time, &date, &time_cs);
 	de->time = de->ctime = time;
 	de->date = de->cdate = de->adate = date;
+	// -> [J.Chiang], 2010/10/26 - Try to support vFAT's file size larger than 4GB
+	#ifndef CONFIG_FAT32_OVER4GB	
 	de->ctime_cs = time_cs;
+	#endif
+	// <- End.
 	de->start = cpu_to_le16(cluster);
 	de->starthi = cpu_to_le16(cluster >> 16);
 	de->size = 0;

@@ -64,6 +64,6 @@ extern struct processor {
 #define cpu_proc_fin()			processor._proc_fin()
 #define cpu_reset(addr)			processor.reset(addr)
 #define cpu_do_idle()			processor._do_idle()
-#define cpu_dcache_clean_area(addr,sz)	processor.dcache_clean_area(addr,sz)
+//#define cpu_dcache_clean_area(addr,sz)	processor.dcache_clean_area(addr,sz)
 #define cpu_set_pte_ext(ptep,pte,ext)	processor.set_pte_ext(ptep,pte,ext)
 #define cpu_do_switch_mm(pgd,mm)	processor.switch_mm(pgd,mm)

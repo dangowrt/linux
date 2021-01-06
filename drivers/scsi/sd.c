@@ -2071,7 +2071,14 @@ static int sd_probe(struct device *dev)
 			goto out_put;
 
 		spin_lock(&sd_index_lock);
-		error = ida_get_new(&sd_index_ida, &index);
+		// -> [J.Chiang], 2012/03/27 - Modified to specify dedicate drive naem (like USB disk starts from sdc)
+		//error = ida_get_new(&sd_index_ida, &index);
+		// If internal SATA port requires service, keep standard method.
+		if (sdp->host->host_no < 2)
+			error = ida_get_new(&sd_index_ida, &index);
+		else
+			error = ida_get_new_above(&sd_index_ida, 2, &index);
+		// <- End.
 		spin_unlock(&sd_index_lock);
 	} while (error == -EAGAIN);
 

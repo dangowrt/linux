@@ -3,7 +3,9 @@ PATCHLEVEL = 6
 SUBLEVEL = 31
 EXTRAVERSION = .14
 NAME = Man-Eating Seals of Antiquity
-
+### -> [Walker Chen], 2010/06/30 - Added for module libs installation path
+INSTALL_MOD_PATH=./kernel-lib
+### <- End.
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
 # More info can be located in ./README
@@ -180,8 +182,9 @@ SUBARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ \
 # Default value for CROSS_COMPILE is not to prefix executables
 # Note: Some architectures assign CROSS_COMPILE in their arch/*/Makefile
 export KBUILD_BUILDHOST := $(SUBARCH)
-ARCH		?= $(SUBARCH)
-CROSS_COMPILE	?=
+ARCH		?= arm
+#CROSS_COMPILE	?= arm-none-linux-gnueabi-
+CROSS_COMPILE	?= arm-linux-
 
 # Architecture as present in compile.h
 UTS_MACHINE 	:= $(ARCH)

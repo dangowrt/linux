@@ -483,13 +483,360 @@ static int __init consistent_init(void)
 
 core_initcall(consistent_init);
 
+#if defined(CONFIG_ARCH_OX820) && defined(CONFIG_SMP)
+#include <mach/rps-irq.h>
+#include <mach/ipi.h>
+#include <mach/rps-timer.h>
+
+extern int gic_set_cpu(unsigned int irq, const struct cpumask *mask_val);
+
+extern asmlinkage void local_v6_dma_inv_range(const void *, const void *);
+extern asmlinkage void local_v6_dma_clean_range(const void *, const void *);
+extern asmlinkage void local_v6_dma_flush_range(const void *, const void *);
+
 /*
  * Make an area consistent for devices.
  * Note: Drivers should NOT use this function directly, as it will break
  * platforms with CONFIG_DMABOUNCE.
  * Use the driver DMA support - see dma-mapping.h (dma_sync_*)
+ *
+ * PLX: IPI s/w broadcast of cache operations on MPCore in software does not
+ *      support outer cache operations at present. If we did then the inner
+ *      cache ops on all CPUs could happen in parallel, but the outer cache
+ *      ops would have to happen only from a single CPU once inner cache ops
+ *      had completed on all CPUs
  */
-void dma_cache_maint(const void *start, size_t size, int direction)
+void dma_cache_maint(
+	const void *start,
+	size_t      size,
+	int         direction)
+{
+	unsigned long flags;
+	unsigned int  cpu;
+	cpumask_t     callmap;
+    struct fiq_coherency_communication_s* comms;
+#ifdef CONFIG_FIQ_TIMEOUTS
+	unsigned long start_ticks;
+#endif // CONFIG_FIQ_TIMEOUTS
+
+	/* Prevent re-entrance on this processor */
+	local_irq_save(flags);
+	cpu = get_cpu();
+	
+	/* We can support a maximum of 2 CPUs */
+	BUG_ON(cpu > 1);
+
+	/* Find the other CPU */
+	callmap = cpu_online_map;
+	cpu_clear(cpu, callmap);
+
+    /* get the ipi work structure */
+    comms = &(per_cpu(fiq_coherency_communication, cpu));
+
+	/* If we're here when the other CPU is still processing a previous cache
+	   coherency operation then something is wrong */
+	BUG_ON(comms->nents);
+
+#ifdef CONFIG_FIQS_USE_ACKS
+	// Protocol violation if the cache ops ack flag is already set
+	BUG_ON(comms->ack);
+#endif // CONFIG_FIQS_USE_ACKS
+
+	/* Only do this if there is another CPU active */
+	if (!cpus_empty(callmap)) {
+		/* Prepare one memory range */
+		comms->type = CACHE_COHERENCY;
+		comms->message.cache_coherency.type = direction;
+		comms->message.cache_coherency.range[0].start = start;
+		comms->message.cache_coherency.range[0].end = start + size;
+		comms->nents = 1;
+		smp_wmb();
+
+#ifdef CONFIG_SERIALIZE_FIQS
+		// Wait for exclusive access to the ability to raise a FIQ
+		while (test_and_set_bit(CACHE_BRDCST_PRIV_FLAG, &cache_brdcst_priviledge));
+#endif // CONFIG_SERIALIZE_FIQS
+
+		/* Inform the other CPU that there's per-CPU data to examine */
+		OX820_RPS_trigger_fiq((cpu == 0) ? 1 : 0);
+
+#ifdef CONFIG_FIQS_USE_ACKS
+		// Wait for the other CPU to enter the FIQ handler so no strex can occur
+		// during the cache operations
+#ifdef CONFIG_FIQ_TIMEOUTS
+		start_ticks = *((volatile unsigned long*)TIMER2_VALUE);
+#endif // CONFIG_FIQ_TIMEOUTS
+		smp_rmb();
+		while (!comms->ack) {
+#ifdef CONFIG_FIQ_TIMEOUTS
+			unsigned long elapsed_ticks;
+			unsigned long now_ticks = *((volatile unsigned long*)TIMER2_VALUE);
+
+			if (now_ticks > start_ticks) {
+				elapsed_ticks = (TIMER_2_LOAD_VALUE - now_ticks) + start_ticks;
+			} else {
+				elapsed_ticks = start_ticks - now_ticks;
+			}
+
+			if (elapsed_ticks > TIMER_2_PRESCALED_CLK) {
+				// Try to force a debug message out using serial interrupts on this
+				// known functional CPU
+				gic_set_cpu(55, cpumask_of(cpu));
+				printk(KERN_WARNING "dma_cache_maint() Wait for FIQ ack took longer "
+					"than 1 second, giving up (CPU %d, ticks 0x%p)\n", cpu,
+					(void*)elapsed_ticks);
+				break;
+			}
+#endif // CONFIG_FIQ_TIMEOUTS
+			smp_rmb();
+		}
+#endif // CONFIG_FIQS_USE_ACKS
+	}
+
+	/* Run the local operation in parallel with the other CPU */
+	switch (direction) {
+		case DMA_BIDIRECTIONAL:
+			local_v6_dma_flush_range(start, start + size);
+			break;
+		case DMA_TO_DEVICE:
+			local_v6_dma_clean_range(start, start + size);
+			break;
+		case DMA_FROM_DEVICE:
+			local_v6_dma_inv_range(start, start + size);
+			break;
+		default:
+			printk(KERN_WARNING "Unknown DMA direction %d\n", direction);
+	}
+
+	/* Only do this if there is another CPU active */
+	if (!cpus_empty(callmap)) {
+#ifdef CONFIG_FIQS_USE_ACKS
+		// Signal the other CPU that we have completed our cache ops
+		comms->ack = 0;
+		smp_wmb();
+#endif // CONFIG_FIQS_USE_ACKS
+
+		/* Rendezvous the two cpus here */
+#ifdef CONFIG_FIQ_TIMEOUTS
+		start_ticks = *((volatile unsigned long*)TIMER2_VALUE);
+#endif // CONFIG_FIQ_TIMEOUTS
+		smp_rmb();
+		while (comms->nents) {
+#ifdef CONFIG_FIQ_TIMEOUTS
+			unsigned long elapsed_ticks;
+			unsigned long now_ticks = *((volatile unsigned long*)TIMER2_VALUE);
+
+			if (now_ticks > start_ticks) {
+				elapsed_ticks = (TIMER_2_LOAD_VALUE - now_ticks) + start_ticks;
+			} else {
+				elapsed_ticks = start_ticks - now_ticks;
+			}
+
+			if (elapsed_ticks > TIMER_2_PRESCALED_CLK) {
+				// Try to force a debug message out using serial interrupts on this
+				// known functional CPU
+				gic_set_cpu(55, cpumask_of(cpu));
+				printk(KERN_WARNING "dma_cache_maint() Wait for sync took longer "
+					"than 1 second, giving up (CPU %d, ticks 0x%p)\n", cpu,
+					(void*)elapsed_ticks);
+				break;
+			}
+#endif // CONFIG_FIQ_TIMEOUTS
+			smp_rmb();
+		}
+
+#ifdef CONFIG_SERIALIZE_FIQS
+		// Relinquish exclusive access to the ability to raise a FIQ
+		clear_bit(CACHE_BRDCST_PRIV_FLAG, &cache_brdcst_priviledge);
+#endif // CONFIG_SERIALIZE_FIQS
+	}
+
+	put_cpu();
+	local_irq_restore(flags);
+}
+
+/*
+ * PLX: IPI s/w broadcast of cache operations on MPCore in software does not
+ *      support outer cache operations at present. If we did then the inner
+ *      cache ops on all CPUs could happen in parallel, but the outer cache
+ *      ops would have to happen only from a single CPU once inner cache ops
+ *      had completed on all CPUs
+ */
+static void dma_cache_maint_contiguous(
+	struct page  *page,
+	unsigned long offset,
+	size_t        size,
+	int           direction)
+{
+	void *vaddr;
+	int   himem = 0;
+
+	/* Get virtual mapping for page and offset */
+	if (!PageHighMem(page)) {
+		vaddr = page_address(page) + offset;
+	} else {
+		vaddr = kmap_high_get(page);
+		if (vaddr) {
+			himem = 1;
+			vaddr += offset;
+		}
+	}
+
+	/* Only do cache op if retrieved a virtual mapping for the page */
+	if (vaddr) {
+		unsigned long flags;
+		unsigned int  cpu;
+		cpumask_t     callmap;
+		struct fiq_coherency_communication_s* comms;
+#ifdef CONFIG_FIQ_TIMEOUTS
+		unsigned long start_ticks;
+#endif // CONFIG_FIQ_TIMEOUTS
+
+		/* Prevent re-entrance on this processor */
+		local_irq_save(flags);
+		cpu = get_cpu();
+	
+		/* We can support a maximum of 2 CPUs */
+		BUG_ON(cpu > 1);
+
+		/* Find the other CPU */
+		callmap = cpu_online_map;
+		cpu_clear(cpu, callmap);
+
+		// get the ipi work structure
+		comms = &(per_cpu(fiq_coherency_communication, cpu));
+
+		/* If we're here when the other CPU is still processing a previous cache
+		   coherency operation then something is wrong */
+		BUG_ON(comms->nents);
+
+#ifdef CONFIG_FIQS_USE_ACKS
+		// Protocol violation if the cache ops ack flag is already set
+		BUG_ON(comms->ack);
+#endif // CONFIG_FIQS_USE_ACKS
+
+		/* Only do this if there is another CPU active */
+		if (!cpus_empty(callmap)) {
+			/* Prepare one memory range */
+			comms->type = CACHE_COHERENCY;
+			comms->message.cache_coherency.type = direction;
+			comms->message.cache_coherency.range[0].start = vaddr;
+			comms->message.cache_coherency.range[0].end = vaddr + size;
+			comms->nents = 1;
+			smp_wmb();
+
+#ifdef CONFIG_SERIALIZE_FIQS
+			// Wait for exclusive access to the ability to raise a FIQ
+			while (test_and_set_bit(CACHE_BRDCST_PRIV_FLAG, &cache_brdcst_priviledge));
+#endif // CONFIG_SERIALIZE_FIQS
+
+			/* Inform the other CPU that there's per-CPU data to examine */
+			OX820_RPS_trigger_fiq((cpu == 0) ? 1 : 0);
+
+#ifdef CONFIG_FIQS_USE_ACKS
+			// Wait for the other CPU to enter the FIQ handler so no strex can occur
+			// during the cache operations
+#ifdef CONFIG_FIQ_TIMEOUTS
+			start_ticks = *((volatile unsigned long*)TIMER2_VALUE);
+#endif // CONFIG_FIQ_TIMEOUTS
+			smp_rmb();
+			while (!comms->ack) {
+#ifdef CONFIG_FIQ_TIMEOUTS
+				unsigned long elapsed_ticks;
+				unsigned long now_ticks = *((volatile unsigned long*)TIMER2_VALUE);
+
+				if (now_ticks > start_ticks) {
+					elapsed_ticks = (TIMER_2_LOAD_VALUE - now_ticks) + start_ticks;
+				} else {
+					elapsed_ticks = start_ticks - now_ticks;
+				}
+
+				if (elapsed_ticks > TIMER_2_PRESCALED_CLK) {
+					// Try to force a debug message out using serial interrupts on this
+					// known functional CPU
+					gic_set_cpu(55, cpumask_of(cpu));
+					printk(KERN_WARNING "dma_cache_maint_contiguous() Wait for FIQ ack took longer "
+						"than 1 second, giving up (CPU %d, ticks 0x%p)\n", cpu,
+						(void*)elapsed_ticks);
+					break;
+				}
+#endif // CONFIG_FIQ_TIMEOUTS
+				smp_rmb();
+			}
+#endif // CONFIG_FIQS_USE_ACKS
+		}
+
+		/* Run the local operation in parallel with the other CPU */
+		switch (direction) {
+			case DMA_BIDIRECTIONAL:
+				local_v6_dma_flush_range(vaddr, vaddr + size);
+				break;
+			case DMA_TO_DEVICE:
+				local_v6_dma_clean_range(vaddr, vaddr + size);
+				break;
+			case DMA_FROM_DEVICE:
+				local_v6_dma_inv_range(vaddr, vaddr + size);
+				break;
+			default:
+				printk(KERN_WARNING "Unknown DMA direction %d\n", direction);
+		}
+
+		/* Only do this if there is another CPU active */
+		if (!cpus_empty(callmap)) {
+#ifdef CONFIG_FIQS_USE_ACKS
+			// Signal the other CPU that we have completed our cache ops
+			comms->ack = 0;
+			smp_wmb();
+#endif // CONFIG_FIQS_USE_ACKS
+
+			/* Rendezvous the two cpus here */
+#ifdef CONFIG_FIQ_TIMEOUTS
+			start_ticks = *((volatile unsigned long*)TIMER2_VALUE);
+#endif // CONFIG_FIQ_TIMEOUTS
+			smp_rmb();
+			while (comms->nents) {
+#ifdef CONFIG_FIQ_TIMEOUTS
+				unsigned long elapsed_ticks;
+				unsigned long now_ticks = *((volatile unsigned long*)TIMER2_VALUE);
+
+				if (now_ticks > start_ticks) {
+					elapsed_ticks = (TIMER_2_LOAD_VALUE - now_ticks) + start_ticks;
+				} else {
+					elapsed_ticks = start_ticks - now_ticks;
+				}
+
+				if (elapsed_ticks > TIMER_2_PRESCALED_CLK) {
+					// Try to force a debug message out using serial interrupts on this
+					// known functional CPU
+					gic_set_cpu(55, cpumask_of(cpu));
+					printk(KERN_WARNING "dma_cache_maint_contiguous() Wait for sync took longer "
+						"than 1 second, giving up (CPU %d, ticks 0x%p)\n", cpu,
+						(void*)elapsed_ticks);
+					break;
+				}
+#endif // CONFIG_FIQ_TIMEOUTS
+				smp_rmb();
+			}
+
+#ifdef CONFIG_SERIALIZE_FIQS
+			// Relinquish exclusive access to the ability to raise a FIQ
+			clear_bit(CACHE_BRDCST_PRIV_FLAG, &cache_brdcst_priviledge);
+#endif // CONFIG_SERIALIZE_FIQS
+		}
+
+		put_cpu();
+		local_irq_restore(flags);
+	}
+
+	if (vaddr && himem) {
+		kunmap_high(page);
+	}
+}
+#else // defined(CONFIG_ARCH_OX820) && defined(CONFIG_SMP)
+void dma_cache_maint(
+	const void *start,
+	size_t      size,
+	int         direction)
 {
 	void (*inner_op)(const void *, const void *);
 	void (*outer_op)(unsigned long, unsigned long);
@@ -516,10 +863,12 @@ void dma_cache_maint(const void *start, size_t size, int direction)
 	inner_op(start, start + size);
 	outer_op(__pa(start), __pa(start) + size);
 }
-EXPORT_SYMBOL(dma_cache_maint);
 
-static void dma_cache_maint_contiguous(struct page *page, unsigned long offset,
-				       size_t size, int direction)
+static void dma_cache_maint_contiguous(
+	struct page  *page,
+	unsigned long offset,
+	size_t        size,
+	int           direction)
 {
 	void *vaddr;
 	unsigned long paddr;
@@ -558,6 +907,8 @@ static void dma_cache_maint_contiguous(struct page *page, unsigned long offset,
 	paddr = page_to_phys(page) + offset;
 	outer_op(paddr, paddr + size);
 }
+#endif // defined(CONFIG_ARCH_OX820) && defined(CONFIG_SMP)
+EXPORT_SYMBOL(dma_cache_maint);
 
 void dma_cache_maint_page(struct page *page, unsigned long offset,
 			  size_t size, int dir)
@@ -586,6 +937,7 @@ void dma_cache_maint_page(struct page *page, unsigned long offset,
 }
 EXPORT_SYMBOL(dma_cache_maint_page);
 
+#if !defined(CONFIG_ARCH_OX820) || !defined(CONFIG_SMP)
 /**
  * dma_map_sg - map a set of SG buffers for streaming mode DMA
  * @dev: valid struct device pointer, or NULL for ISA and EISA-like devices
@@ -622,6 +974,7 @@ int dma_map_sg(struct device *dev, struct scatterlist *sg, int nents,
 	return 0;
 }
 EXPORT_SYMBOL(dma_map_sg);
+#endif
 
 /**
  * dma_unmap_sg - unmap a set of SG buffers mapped by dma_map_sg

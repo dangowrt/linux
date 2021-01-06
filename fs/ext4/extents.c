@@ -107,11 +107,8 @@ static int ext4_ext_truncate_extend_restart(handle_t *handle,
 	if (err <= 0)
 		return err;
 	err = ext4_truncate_restart_trans(handle, inode, needed);
-	/*
-	 * We have dropped i_data_sem so someone might have cached again
-	 * an extent we are going to truncate.
-	 */
-	ext4_ext_invalidate_cache(inode);
+	if (err == 0)
+		err = -EAGAIN;
 
 	return err;
 }
@@ -2228,7 +2225,7 @@ static int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t start)
 	int depth = ext_depth(inode);
 	struct ext4_ext_path *path;
 	handle_t *handle;
-	int i = 0, err = 0;
+	int i, err;
 
 	ext_debug("truncate since %u\n", start);
 
@@ -2237,23 +2234,26 @@ static int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t start)
 	if (IS_ERR(handle))
 		return PTR_ERR(handle);
 
+again:
 	ext4_ext_invalidate_cache(inode);
 
 	/*
 	 * We start scanning from right side, freeing all the blocks
 	 * after i_size and walking into the tree depth-wise.
 	 */
+	depth = ext_depth(inode);
 	path = kzalloc(sizeof(struct ext4_ext_path) * (depth + 1), GFP_NOFS);
 	if (path == NULL) {
 		ext4_journal_stop(handle);
 		return -ENOMEM;
 	}
+	path[0].p_depth = depth;
 	path[0].p_hdr = ext_inode_hdr(inode);
 	if (ext4_ext_check(inode, path[0].p_hdr, depth)) {
 		err = -EIO;
 		goto out;
 	}
-	path[0].p_depth = depth;
+	i = err = 0;
 
 	while (i >= 0 && err == 0) {
 		if (i == depth) {
@@ -2347,6 +2347,8 @@ static int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t start)
 out:
 	ext4_ext_drop_refs(path);
 	kfree(path);
+	if (err == -EAGAIN)
+		goto again;
 	ext4_journal_stop(handle);
 
 	return err;
@@ -2473,7 +2475,9 @@ static int ext4_ext_zeroout(struct inode *inode, struct ext4_extent *ex)
 	return ret;
 }
 
-#define EXT4_EXT_ZERO_LEN 7
+//#define EXT4_EXT_ZERO_LEN 7
+#define EXT4_EXT_ZERO_LEN 0
+
 /*
  * This function is called by ext4_ext_get_blocks() if someone tries to write
  * to an uninitialized extent. It may result in splitting the uninitialized
@@ -2488,7 +2492,8 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 						struct inode *inode,
 						struct ext4_ext_path *path,
 						ext4_lblk_t iblock,
-						unsigned int max_blocks)
+						unsigned int max_blocks,
+						int zeroout_flag)
 {
 	struct ext4_extent *ex, newex, orig_ex;
 	struct ext4_extent *ex1 = NULL;
@@ -2513,14 +2518,29 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 	orig_ex.ee_len   = cpu_to_le16(ee_len);
 	ext4_ext_store_pblock(&orig_ex, ext_pblock(ex));
 
+	if(!zeroout_flag) {
+		/* check whether the extent is inited and if so, return the end of the
+		 * inited extent - start block as the allocated extent so that the next
+		 * request will start from there
+		 */
+//		printk(KERN_INFO "ext4_ext_convert_to_initialized: block - %u, length - %u, status - %d\n", iblock, max_blocks, ext4_ext_is_uninitialized(ex));
+
+		if(!ext4_ext_is_uninitialized(ex)) {
+//			printk (KERN_INFO "allocating into a initialised extent - returing allocated - %u\n", (allocated > max_blocks) ? max_blocks : allocated);
+			return (allocated > max_blocks) ? max_blocks : allocated;
+		}
+	}
+
 	err = ext4_ext_get_access(handle, inode, path + depth);
 	if (err)
 		goto out;
 	/* If extent has less than 2*EXT4_EXT_ZERO_LEN zerout directly */
 	if (ee_len <= 2*EXT4_EXT_ZERO_LEN) {
-		err =  ext4_ext_zeroout(inode, &orig_ex);
-		if (err)
-			goto fix_extent_len;
+		if(zeroout_flag) {
+			err =  ext4_ext_zeroout(inode, &orig_ex);
+			if (err)
+				goto fix_extent_len;
+		}
 		/* update the extent length and mark as initialized */
 		ex->ee_block = orig_ex.ee_block;
 		ex->ee_len   = orig_ex.ee_len;
@@ -2569,9 +2589,11 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 			err = ext4_ext_insert_extent(handle, inode, path,
 							ex3, 0);
 			if (err == -ENOSPC) {
-				err =  ext4_ext_zeroout(inode, &orig_ex);
-				if (err)
-					goto fix_extent_len;
+				if(zeroout_flag) {
+					err =  ext4_ext_zeroout(inode, &orig_ex);
+					if (err)
+						goto fix_extent_len;
+				}
 				ex->ee_block = orig_ex.ee_block;
 				ex->ee_len   = orig_ex.ee_len;
 				ext4_ext_store_pblock(ex, ext_pblock(&orig_ex));
@@ -2582,37 +2604,39 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 			} else if (err)
 				goto fix_extent_len;
 
-			/*
-			 * We need to zero out the second half because
-			 * an fallocate request can update file size and
-			 * converting the second half to initialized extent
-			 * implies that we can leak some junk data to user
-			 * space.
-			 */
-			err =  ext4_ext_zeroout(inode, ex3);
-			if (err) {
+			if(zeroout_flag) {
 				/*
-				 * We should actually mark the
-				 * second half as uninit and return error
-				 * Insert would have changed the extent
+				 * We need to zero out the second half because
+				 * an fallocate request can update file size and
+				 * converting the second half to initialized extent
+				 * implies that we can leak some junk data to user
+				 * space.
 				 */
-				depth = ext_depth(inode);
-				ext4_ext_drop_refs(path);
-				path = ext4_ext_find_extent(inode,
-								iblock, path);
-				if (IS_ERR(path)) {
-					err = PTR_ERR(path);
+				err =  ext4_ext_zeroout(inode, ex3);
+				if (err) {
+					/*
+					 * We should actually mark the
+					 * second half as uninit and return error
+					 * Insert would have changed the extent
+					 */
+					depth = ext_depth(inode);
+					ext4_ext_drop_refs(path);
+					path = ext4_ext_find_extent(inode,
+									iblock, path);
+					if (IS_ERR(path)) {
+						err = PTR_ERR(path);
+						return err;
+					}
+					/* get the second half extent details */
+					ex = path[depth].p_ext;
+					err = ext4_ext_get_access(handle, inode,
+									path + depth);
+					if (err)
+						return err;
+					ext4_ext_mark_uninitialized(ex);
+					ext4_ext_dirty(handle, inode, path + depth);
 					return err;
 				}
-				/* get the second half extent details */
-				ex = path[depth].p_ext;
-				err = ext4_ext_get_access(handle, inode,
-								path + depth);
-				if (err)
-					return err;
-				ext4_ext_mark_uninitialized(ex);
-				ext4_ext_dirty(handle, inode, path + depth);
-				return err;
 			}
 
 			/* zeroed the second half */
@@ -2625,9 +2649,15 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 		ext4_ext_mark_uninitialized(ex3);
 		err = ext4_ext_insert_extent(handle, inode, path, ex3, 0);
 		if (err == -ENOSPC) {
-			err =  ext4_ext_zeroout(inode, &orig_ex);
-			if (err)
+			if(zeroout_flag) {
+				err =  ext4_ext_zeroout(inode, &orig_ex);
+				if (err)
+					goto fix_extent_len;
+			}
+			else {
+				printk(KERN_WARNING "No space to insert extent 1\n");
 				goto fix_extent_len;
+			}
 			/* update the extent length and mark as initialized */
 			ex->ee_block = orig_ex.ee_block;
 			ex->ee_len   = orig_ex.ee_len;
@@ -2674,9 +2704,11 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 		 */
 		if (le16_to_cpu(orig_ex.ee_len) <= EXT4_EXT_ZERO_LEN &&
 							iblock != ee_block) {
-			err =  ext4_ext_zeroout(inode, &orig_ex);
-			if (err)
-				goto fix_extent_len;
+			if(zeroout_flag) {
+				err =  ext4_ext_zeroout(inode, &orig_ex);
+				if (err)
+					goto fix_extent_len;
+			}
 			/* update the extent length and mark as initialized */
 			ex->ee_block = orig_ex.ee_block;
 			ex->ee_len   = orig_ex.ee_len;
@@ -2743,6 +2775,9 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 insert:
 	err = ext4_ext_insert_extent(handle, inode, path, &newex, 0);
 	if (err == -ENOSPC) {
+		printk(KERN_WARNING "No space to insert extent 2\n");
+		goto fix_extent_len;
+
 		err =  ext4_ext_zeroout(inode, &orig_ex);
 		if (err)
 			goto fix_extent_len;
@@ -2794,7 +2829,7 @@ static int ext4_split_unwritten_extents(handle_t *handle,
 					struct ext4_ext_path *path,
 					ext4_lblk_t iblock,
 					unsigned int max_blocks,
-					int flags)
+					int flags, int zeroout_flag)
 {
 	struct ext4_extent *ex, newex, orig_ex;
 	struct ext4_extent *ex1 = NULL;
@@ -2927,9 +2962,11 @@ static int ext4_split_unwritten_extents(handle_t *handle,
 insert:
 	err = ext4_ext_insert_extent(handle, inode, path, &newex, flags);
 	if (err == -ENOSPC) {
-		err =  ext4_ext_zeroout(inode, &orig_ex);
-		if (err)
-			goto fix_extent_len;
+		if(zeroout_flag) {
+			err =  ext4_ext_zeroout(inode, &orig_ex);
+			if (err)
+				goto fix_extent_len;
+		}
 		/* update the extent length and mark as initialized */
 		ex->ee_block = orig_ex.ee_block;
 		ex->ee_len   = orig_ex.ee_len;
@@ -3011,7 +3048,7 @@ ext4_ext_handle_uninitialized_extents(handle_t *handle, struct inode *inode,
 			ext4_lblk_t iblock, unsigned int max_blocks,
 			struct ext4_ext_path *path, int flags,
 			unsigned int allocated, struct buffer_head *bh_result,
-			ext4_fsblk_t newblock)
+			ext4_fsblk_t newblock, int zeroout_flag)
 {
 	int ret = 0;
 	int err = 0;
@@ -3027,7 +3064,7 @@ ext4_ext_handle_uninitialized_extents(handle_t *handle, struct inode *inode,
 	if (flags == EXT4_GET_BLOCKS_DIO_CREATE_EXT) {
 		ret = ext4_split_unwritten_extents(handle,
 						inode, path, iblock,
-						max_blocks, flags);
+						max_blocks, flags, zeroout_flag);
 		/*
 		 * Flag the inode(non aio case) or end_io struct (aio case)
 		 * that this IO needs to convertion to written when IO is
@@ -3071,7 +3108,7 @@ ext4_ext_handle_uninitialized_extents(handle_t *handle, struct inode *inode,
 	/* buffered write, writepage time, convert*/
 	ret = ext4_ext_convert_to_initialized(handle, inode,
 						path, iblock,
-						max_blocks);
+						max_blocks, zeroout_flag);
 	if (ret >= 0)
 		ext4_update_inode_fsync_trans(handle, inode, 1);
 out:
@@ -3204,7 +3241,7 @@ int ext4_ext_get_blocks(handle_t *handle, struct inode *inode,
 			}
 			ret = ext4_ext_handle_uninitialized_extents(handle,
 					inode, iblock, max_blocks, path,
-					flags, allocated, bh_result, newblock);
+					flags, allocated, bh_result, newblock, 1);
 			return ret;
 		}
 	}
@@ -3513,6 +3550,107 @@ retry:
 	return ret > 0 ? ret2 : ret;
 }
 
+static int ext4_get_write_access(struct inode *inode, loff_t offset, loff_t length);
+
+int ext4_preallocate(
+	struct file	*filp,
+	loff_t		 offset,
+	loff_t		 len)
+{
+	struct inode *inode = filp->f_path.dentry->d_inode; 
+	int retval = 0;
+
+	retval = ext4_fallocate(inode, FALLOC_FL_KEEP_SIZE, offset, len);
+	if (likely(!retval)) {
+		// Assuming offset,length precisely cover the actually preallocated region
+		retval = ext4_get_write_access(inode, offset, len);
+	}
+
+	return retval;
+}
+
+int ext4_unpreallocate(
+	struct file	*filp,
+	loff_t		 offset,
+	loff_t		 len)
+{
+	ext4_truncate(filp->f_path.dentry->d_inode);
+	return 0;
+}
+
+int ext4_resetpreallocate(
+	struct file	*filp,
+	loff_t		 offset,
+	loff_t		 len)
+{
+	handle_t *handle = ext4_journal_current_handle();
+	struct inode * inode = filp->f_path.dentry->d_inode;
+	struct ext4_ext_path *path = NULL;
+	int ret, started = 0;
+	int reset_credits;
+	unsigned int blkbits = inode->i_sb->s_blocksize_bits;
+
+	ext4_lblk_t startblock = offset >> blkbits; /* in terms of FSBs*/
+	int num_of_blocks = len >> blkbits; /* in terms of FSBs */
+
+//	printk (KERN_INFO "reset_preallocate - offset - %lld, length - %lld\n", offset, len);
+
+	if ((num_of_blocks << blkbits) < len)
+		++num_of_blocks;
+
+	if (!handle) {
+		/* reset preallcoate */
+		reset_credits = ext4_chunk_trans_blocks(inode, num_of_blocks);
+		handle = ext4_journal_start(inode, reset_credits);
+		if (IS_ERR(handle)) {
+			ret = PTR_ERR(handle);
+			goto out;
+		}
+		started = 1;
+	}
+
+	down_write((&EXT4_I(inode)->i_data_sem));
+
+	do {
+		struct ext4_ext_path * path_was = path;
+		path = ext4_ext_find_extent(inode, startblock, path);
+		if (IS_ERR(path)) {
+			ret = PTR_ERR(path);
+			path = path_was;
+			goto out2;
+		}
+
+		/* find extent for this block */
+		ret = ext4_ext_convert_to_initialized(handle, inode,
+				path, startblock,
+				num_of_blocks, 0);
+//		printk ("after initializing extent - ret val - %d\n", ret);
+
+		if (ret < 0)
+			break;
+		startblock += ret;
+		num_of_blocks -= ret;
+
+		ext4_ext_drop_refs(path);
+		ext4_ext_invalidate_cache(inode);
+
+	} while(num_of_blocks > 0);
+	if (num_of_blocks < 0)
+		printk(KERN_WARNING "ext4_ext_convert_to_initialized returned more blocks than expected\n");
+
+out2:
+	if(path) {
+		kfree(path);
+	}
+
+	up_write((&EXT4_I(inode)->i_data_sem));
+
+	if (started)
+		ext4_journal_stop(handle);
+out:
+	return ret;
+}
+
 /*
  * This function convert a range of blocks to written extents
  * The caller of this function will pass the start offset and the size.
@@ -3648,7 +3786,7 @@ static int ext4_ext_fiemap_cb(struct inode *inode, struct ext4_ext_path *path,
 }
 
 /* fiemap flags we can handle specified here */
-#define EXT4_FIEMAP_FLAGS	(FIEMAP_FLAG_SYNC|FIEMAP_FLAG_XATTR)
+#define EXT4_FIEMAP_FLAGS	(FIEMAP_FLAG_SYNC|FIEMAP_FLAG_XATTR|FIEMAP_KERNEL_READ)
 
 static int ext4_xattr_fiemap(struct inode *inode,
 				struct fiemap_extent_info *fieinfo)
@@ -3673,6 +3811,7 @@ static int ext4_xattr_fiemap(struct inode *inode,
 		physical += offset;
 		length = EXT4_SB(inode->i_sb)->s_inode_size - offset;
 		flags |= FIEMAP_EXTENT_DATA_INLINE;
+		brelse(iloc.bh);
 	} else { /* external block */
 		physical = EXT4_I(inode)->i_file_acl << blockbits;
 		length = inode->i_sb->s_blocksize;
@@ -3716,3 +3855,270 @@ int ext4_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 	return error;
 }
 
+#define BBSHIFT							9
+#define BBSIZE							(1<<BBSHIFT)
+#define BTOBB(bytes)					(((__u64)(bytes) + BBSIZE - 1) >> BBSHIFT)
+#define BMV_OF_LAST  					0x4
+#define GETBMAPX_BLOCK_HOLE             (-1LL)
+
+/* This function reads the filemap details as fiemap structure,
+ * converts it to the bmapx structure and returns to the user
+ * points to remember
+ * length -1 implies read to the end of the map
+ * fiemap structure doesnot account for holes in files but
+ * bmapx accounts for it. Have to think about it on covnersion
+ */
+int ext4_getbmapx(struct inode *inode, struct getbmapx *bmx)
+{
+	int			  count = 0;
+	int			  error = 0;
+	int 		  bmv_count;
+	struct fiemap_extent_info fileinfo;
+	struct getbmapx * map;
+	struct fiemap_extent * fie_map;
+	__u64 start = 0;
+	__u64 len = FIEMAP_MAX_OFFSET; /* assume that we always read the entire extent let */
+	__u64 cum_len = 0; /* in sectors */
+
+	if (bmx->bmv_count < 2)
+		return -EINVAL;
+
+	filemap_write_and_wait(inode->i_mapping);
+
+	bmv_count = bmx->bmv_count - 1;
+	/* create a filemap structure of the required size */
+	fileinfo.fi_extents_max = bmx->bmv_count - 1;
+	fileinfo.fi_flags = FIEMAP_KERNEL_READ;
+	fileinfo.fi_extents_mapped = 0;
+
+	fileinfo.fi_extents_start = kzalloc(sizeof(struct fiemap_extent) * (fileinfo.fi_extents_max), GFP_KERNEL);
+	if (!fileinfo.fi_extents_start) {
+		printk (KERN_INFO "ext4_getbmapx - no memory\n");
+		return -ENOMEM;
+	}
+
+	/* read the fiemap of the file */
+	error = ext4_fiemap(inode, &fileinfo, start, len);
+
+//	printk (KERN_INFO "number of mapped extents - %d\n", fileinfo.fi_extents_mapped);
+
+	map = bmx;
+	fie_map = fileinfo.fi_extents_start;
+	map ++; /* the first one doensot store any map in it */
+	/* convert the fiemap to bmapx structure */
+	while ( (count < fileinfo.fi_extents_mapped) && (bmx->bmv_entries < bmv_count) ){
+		/* ext4 doesnot return a bmap for a hole in the file
+		 * additional check added to detect hole and pass it
+		 * to the caller with appropriate flags
+		 */
+		if(cum_len < BTOBB (fie_map->fe_logical)) {
+			printk(KERN_INFO "ext4 : found hole in filemap \n");
+			map->bmv_offset = cum_len;
+			map->bmv_length = (BTOBB (fie_map->fe_logical)) - cum_len;
+			map->bmv_block = GETBMAPX_BLOCK_HOLE;
+			cum_len += map->bmv_length;
+			bmx->bmv_entries ++;
+			map ++;
+			continue;
+		}
+
+		map->bmv_offset = BTOBB (fie_map->fe_logical);
+		map->bmv_block = BTOBB (fie_map->fe_physical);
+		map->bmv_length = BTOBB (fie_map->fe_length);
+
+		/* at present we care only for prealloc flag
+		 * all other flags are ignored
+		 */
+		if(fie_map->fe_flags & FIEMAP_EXTENT_UNWRITTEN)
+			map->bmv_oflags = GETBMAPX_OF_PREALLOC;
+
+		if(fie_map->fe_flags & FIEMAP_EXTENT_LAST)
+			map->bmv_oflags |= BMV_OF_LAST;
+
+//		printk(KERN_INFO "extent - %d -map offset - %lld, length - %lld, block - %lld\n", count+1, map->bmv_offset, map->bmv_length, map->bmv_block);
+
+		cum_len += map->bmv_length;
+		bmx->bmv_entries ++;
+		map ++;
+
+		fie_map ++;
+		count ++;
+	}
+
+	kfree(fileinfo.fi_extents_start);
+	fileinfo.fi_extents_start = NULL;
+	return error;
+}
+
+int ext4_get_extents(struct inode *inode)
+{
+	/* retrieve the fiemap with a structure of size 0
+	 * will provde the number of extents required to hold
+	 * the filemap of the entire file
+	 */
+	int			  retval = 0;
+	struct fiemap_extent_info fileinfo;
+	__u64 start = 0;
+	__u64 len = FIEMAP_MAX_OFFSET; /* assume that we always read the entire extent let */
+
+	fileinfo.fi_extents_max = 0; /* trick to retrive just the number of extents */
+	fileinfo.fi_flags = FIEMAP_KERNEL_READ;
+	fileinfo.fi_extents_mapped = 0;
+	fileinfo.fi_extents_start = NULL;
+
+	/* read the fiemap of the file */
+	retval = ext4_fiemap(inode, &fileinfo, start, len);
+
+	if(retval)
+		return -EINVAL;
+
+	retval = fileinfo.fi_extents_mapped;
+	return retval;
+}
+
+/**
+ * The i_disksize attribute of the inode does not automatically track the
+ * amount of data on the disk due to the way that the direct write code makes
+ * data "magically" appear on the disk. Fast write code will use this function
+ * to update i_disksize.
+ *
+ * @param inode The inode being re-sized
+ * @param newsize The new i_disksize, if this is smaller than the current size
+ *      this function will have no effect.
+ * @return Will always return 1 to indicate that the update worked, even if the
+ *      size hasn't changed. returns 0 if journaling fails.
+ */
+int ext4_setsize(struct inode* inode, loff_t new_size)
+{
+	if (new_size > EXT4_I(inode)->i_disksize)
+		ext4_update_i_disksize(inode, new_size);
+	
+	return 1;
+}
+
+static int ext4_journal_get_data_write_access(
+	const char         *where,
+	handle_t           *handle,
+	struct buffer_head *bh)
+{
+	int err = 0;
+
+	if (ext4_handle_valid(handle)) {
+		err = jbd2_journal_get_data_write_access(handle, bh);
+		if (err) {
+			ext4_journal_abort_handle(where, __func__, bh, handle, err);
+		}
+	}
+
+	return err;
+}
+ 
+extern const int FAST_NUM_EXTENTS_LIMIT;
+
+static int ext4_get_write_access(
+	struct inode *inode,
+	loff_t        offset,
+	loff_t        length)
+{
+	struct fiemap_extent_info fileinfo;
+	int journal_started;
+	handle_t *handle;
+	struct fiemap_extent* fie_map;
+	int count;
+	int retval = 0;
+
+	// Initial this first so can unconditionally free buffer
+	fileinfo.fi_extents_start = NULL;
+	fileinfo.fi_extents_mapped = 0;
+	fileinfo.fi_flags = FIEMAP_KERNEL_READ;
+
+	// What is this for?
+	filemap_write_and_wait(inode->i_mapping);
+
+	// Trick to retrieve just the number of extents
+	fileinfo.fi_extents_max = 0;
+
+	// Get the total number of extents in the file
+	retval = ext4_fiemap(inode, &fileinfo, 0, FIEMAP_MAX_OFFSET);
+	if (retval) {
+		retval = -EINVAL;
+		goto out;
+	}
+
+	// Limit the number of extents to avoid memory allocation problems with 
+	// large filemaps
+	if (fileinfo.fi_extents_mapped > FAST_NUM_EXTENTS_LIMIT) {
+//		printk(KERN_INFO "ext4_get_write_access() Inode %p too many extents (%d > %d)\n",
+//			inode, fileinfo.fi_extents_mapped, FAST_NUM_EXTENTS_LIMIT);
+		retval = -EFBIG;
+		goto out;
+	}
+
+	// Get the number of extents newly preallocated
+	fileinfo.fi_extents_mapped = 0;
+	retval = ext4_fiemap(inode, &fileinfo, offset, length);
+	if (retval) {
+		retval = -EINVAL;
+		goto out;
+	}
+
+	// Get the complete filemap
+	fileinfo.fi_extents_max = fileinfo.fi_extents_mapped;
+
+	fileinfo.fi_extents_start =
+		kzalloc(sizeof(struct fiemap_extent) * (fileinfo.fi_extents_max), GFP_KERNEL);
+
+	if (!fileinfo.fi_extents_start) {
+		retval = -ENOMEM;
+		goto out;
+	}
+
+	retval = ext4_fiemap(inode, &fileinfo, offset, length);
+	if (retval) {
+		retval = -EINVAL;
+		goto out;
+	}
+
+	// Make each page in the filemap ready for writing
+	journal_started = 0;
+	handle = ext4_journal_current_handle();
+	if (!handle) {
+		// Arbitrary: none of these will actually get journalled
+		handle = ext4_journal_start(inode, 16); 
+		journal_started = 1;
+	}
+
+	count = 0;
+	fie_map = fileinfo.fi_extents_start;
+	while (count < fileinfo.fi_extents_mapped){
+		long long start_page;
+		long long length_pages;
+		long long i;
+
+		start_page   = BTOBB(fie_map->fe_physical) >> 3;
+		length_pages = BTOBB(fie_map->fe_length) >> 3;
+
+		for (i = 0; i < length_pages; i++) {
+			struct buffer_head* bh;
+
+			bh = __find_get_block(inode->i_sb->s_bdev, start_page + i, 4096);
+			if (bh) {
+				if (unlikely(buffer_dirty(bh))) {
+					ext4_journal_get_data_write_access(__func__, handle, bh);
+				}
+				brelse(bh);
+			}
+		}
+
+		fie_map++;
+		count++;
+	}
+
+	if (journal_started) {
+		ext4_journal_stop(handle);
+	}
+
+out:
+	kfree(fileinfo.fi_extents_start);
+	return retval;
+}

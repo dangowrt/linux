@@ -29,7 +29,12 @@ static const size_t	pool_max [HCD_BUFFER_POOLS] = {
 	32,
 	128,
 	512,
-	PAGE_SIZE / 2
+	// -> [J.Chiang], 2011/05/28 - Extended page pool to 64KB for net.USB requirement
+	//PAGE_SIZE / 2
+	PAGE_SIZE / 2,
+	PAGE_SIZE,
+	16 * PAGE_SIZE
+	// <- End.
 	/* bigger --> allocate pages */
 };
 

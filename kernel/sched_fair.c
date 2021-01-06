@@ -772,9 +772,9 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int sleep)
 
 	clear_buddies(cfs_rq, se);
 
+	account_entity_dequeue(cfs_rq, se);
 	if (se != cfs_rq->curr)
 		__dequeue_entity(cfs_rq, se);
-	account_entity_dequeue(cfs_rq, se);
 	update_min_vruntime(cfs_rq);
 }
 
@@ -1511,19 +1511,31 @@ static struct task_struct *pick_next_task_fair(struct rq *rq)
 {
 	struct task_struct *p;
 	struct cfs_rq *cfs_rq = &rq->cfs;
-	struct sched_entity *se;
+	struct sched_entity *se, *last_se = NULL;
 
 	if (unlikely(!cfs_rq->nr_running))
 		return NULL;
 
+#ifdef SMP
+	WARN_ON(!spin_is_locked(&rq->lock));
+#endif // SMP
 	do {
 		se = pick_next_entity(cfs_rq);
+		if (unlikely(se == NULL)) {
+			printk(KERN_WARNING "pick_next_task_fair: last_se %p\n", last_se);
+			if (last_se) {
+				se = last_se;
+				break;
+			}
+			return NULL;
+		}
 		/*
 		 * If se was a buddy, clear it so that it will have to earn
 		 * the favour again.
 		 */
 		__clear_buddies(cfs_rq, se);
 		set_next_entity(cfs_rq, se);
+		last_se = se;
 		cfs_rq = group_cfs_rq(se);
 	} while (cfs_rq);
 

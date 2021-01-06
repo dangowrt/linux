@@ -1513,6 +1513,10 @@ int vfs_create(struct inode *dir, struct dentry *dentry, int mode,
 	return error;
 }
 
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+#include <mach/fast_open_filter.h>
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+
 int may_open(struct path *path, int acc_mode, int flag)
 {
 	struct dentry *dentry = path->dentry;
@@ -1591,9 +1595,20 @@ int may_open(struct path *path, int acc_mode, int flag)
 		if (!error) {
 			vfs_dq_init(inode);
 
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+//printk(KERN_INFO "may_open() %s invoking begin_truncate()\n", dentry->d_name.name);
+			begin_truncate(inode);
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+
+//printk(KERN_INFO "may_open() %s\n", dentry->d_name.name);
 			error = do_truncate(dentry, 0,
 					    ATTR_MTIME|ATTR_CTIME|ATTR_OPEN,
 					    NULL);
+
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+//printk(KERN_INFO "may_open() %s invoking end_truncate()\n", dentry->d_name.name);
+			end_truncate(inode);
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 		}
 		put_write_access(inode);
 		if (error)

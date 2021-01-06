@@ -306,8 +306,8 @@ int musb_hub_control(
 		desc->bHubContrCurrent = 0;
 
 		/* workaround bogus struct definition */
-		desc->DeviceRemovable[0] = 0x02;	/* port 1 */
-		desc->DeviceRemovable[1] = 0xff;
+		desc->bitmap[0] = 0x02;	/* port 1 */
+		desc->bitmap[1] = 0xff;
 		}
 		break;
 	case GetHubStatus:

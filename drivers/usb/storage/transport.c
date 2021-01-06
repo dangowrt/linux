@@ -469,10 +469,31 @@ int usb_stor_bulk_srb(struct us_data* us, unsigned int pipe,
 		      struct scsi_cmnd* srb)
 {
 	unsigned int partial;
+	// -> [Walker Chen], 2011/03/17 - usb hdd active Indicator
+	extern int usb_hdd_active;
+	//printk("usb_hdd_active\n");
+	
+#ifdef CONFIG_BOARD_D20
+	//printk("usb_scsi_host_no=0x%x\n" , srb->device->host->host_no );
+	/* We ignore scsi host2 becouse it's USB Card reader */
+	if ( srb->device->host->host_no != 2 )
+		usb_hdd_active = 1;		
+#else
+	usb_hdd_active = 1;
+#endif
+	//End.
 	int result = usb_stor_bulk_transfer_sglist(us, pipe, scsi_sglist(srb),
 				      scsi_sg_count(srb), scsi_bufflen(srb),
 				      &partial);
-
+	// -> [Walker Chen], 2011/03/17 - usb hdd active Indicator
+#ifdef CONFIG_BOARD_D20
+	/* We ignore scsi host2 becouse it's USB Card reader */
+	if ( srb->device->host->host_no != 2 )
+		usb_hdd_active = 0;
+#else
+	usb_hdd_active = 0;
+#endif	
+	//End.
 	scsi_set_resid(srb, scsi_bufflen(srb) - partial);
 	return result;
 }
@@ -601,6 +622,40 @@ void usb_stor_invoke_transport(struct scsi_cmnd *srb, struct us_data *us)
 {
 	int need_auto_sense;
 	int result;
+	
+	// -> [Walker Chen], 2010/09/21 - ATON7715 via VL700 spindown debug
+	#ifdef CONFIG_BOARD_ATON7715
+	if(srb->cmnd[0]==START_STOP) {
+		//printk("USB storage:scsi_command:0x%x \n",srb->cmnd[0] );
+		srb->cmnd[0]=0xa1;	//ATA pass-through command
+		srb->cmnd[9]=0xe0;	//ATA_STANDBY_IMMEDIATE
+	}
+	#endif //CONFIG_BOARD_ATON7715
+	// <- End.
+
+
+	// -> [Walker Chen], 2010/07/30 - USB storage Swap sector-0 and sector-8
+	#ifdef	CONFIG_USB_USE_HIDE_MBR
+	if(srb->cmnd[0]==READ_10 || srb->cmnd[0]==WRITE_10)
+	{
+		/*
+		printk("USB storage:scsi_command:0x%x \n",srb->cmnd[0] );
+		u32 sector= (srb->cmnd[2]<<(8*3)) |
+				(srb->cmnd[3]<<(8*2)) |
+				(srb->cmnd[4]<<(8*1)) |
+				(srb->cmnd[5]<<(8*0))	;
+		printk("sector=0x%x\n",sector);
+		*/
+		if (srb->cmnd[2]==0 && srb->cmnd[3]==0 && srb->cmnd[4]==0 && srb->cmnd[5]==0)
+			srb->cmnd[5]=8;
+		else
+		{
+			if (srb->cmnd[2]==0 && srb->cmnd[3]==0 && srb->cmnd[4]==0 && srb->cmnd[5]==8)
+				srb->cmnd[5]=0;
+		}
+	}
+	#endif //CONFIG_USB_USE_HIDE_MBR
+	// <- End.
 
 	/* send the command to the transport layer */
 	scsi_set_resid(srb, 0);

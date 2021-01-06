@@ -42,7 +42,7 @@ ENTRY(cpu_v6_proc_init)
 ENTRY(cpu_v6_proc_fin)
 	stmfd	sp!, {lr}
 	cpsid	if				@ disable interrupts
-	bl	v6_flush_kern_cache_all
+	bl	local_v6_flush_kern_cache_all
 	mrc	p15, 0, r0, c1, c0, 0		@ ctrl register
 	bic	r0, r0, #0x1000			@ ...i............
 	bic	r0, r0, #0x0006			@ .............ca.
@@ -77,7 +77,7 @@ ENTRY(cpu_v6_do_idle)
 	mcr	p15, 0, r1, c7, c0, 4		@ wait for interrupt
 	mov	pc, lr
 
-ENTRY(cpu_v6_dcache_clean_area)
+ENTRY(local_cpu_v6_dcache_clean_area)
 #ifndef TLB_CAN_READ_FROM_L1_CACHE
 1:	mcr	p15, 0, r0, c7, c10, 1		@ clean D entry
 	add	r0, r0, #D_CACHE_LINE_SIZE
@@ -196,7 +196,7 @@ ENTRY(v6_processor_functions)
 	.word	cpu_v6_proc_fin
 	.word	cpu_v6_reset
 	.word	cpu_v6_do_idle
-	.word	cpu_v6_dcache_clean_area
+	.word	0
 	.word	cpu_v6_switch_mm
 	.word	cpu_v6_set_pte_ext
 	.size	v6_processor_functions, . - v6_processor_functions

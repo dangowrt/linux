@@ -35,6 +35,11 @@
 #define ATTR_VOLUME	8	/* volume label */
 #define ATTR_DIR	16	/* directory */
 #define ATTR_ARCH	32	/* archived */
+// -> [J.Chiang], 2010/10/26 - Try to support vFAT's file size larger than 4GB
+#ifdef CONFIG_FAT32_OVER4GB	
+#define ATTR_BIGFILE	128	/* The file size is larger than 4GB */
+#endif
+// <- End.
 
 /* attribute bits that are copied "as is" */
 #define ATTR_UNUSED	(ATTR_VOLUME | ATTR_ARCH | ATTR_SYS | ATTR_HIDDEN)

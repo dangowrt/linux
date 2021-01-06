@@ -185,3 +185,7 @@ config USB_LIBUSUAL
 		options libusual bias="ub"
 
 	  If unsure, say N.
+
+config USB_USE_HIDE_MBR
+	bool "USB USE HIDE MBR"
+	default n	

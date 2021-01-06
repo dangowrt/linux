@@ -98,3 +98,6 @@ config FAT_DEFAULT_IOCHARSET
 
 	  Enable any character sets you need in File Systems/Native Language
 	  Support.
+config	FAT32_OVER4GB
+	bool "FAT32_OVER4GB"
+	default n

@@ -52,7 +52,7 @@ ENTRY(v6_icache_inval_all)
  *
  *	It is assumed that:
  */
-ENTRY(v6_flush_kern_cache_all)
+ENTRY(local_v6_flush_kern_cache_all)
 	mov	r0, #0
 #ifdef HARVARD_CACHE
 	mcr	p15, 0, r0, c7, c14, 0		@ D cache clean+invalidate
@@ -73,7 +73,7 @@ ENTRY(v6_flush_kern_cache_all)
  *
  *	- mm    - mm_struct describing address space
  */
-ENTRY(v6_flush_user_cache_all)
+ENTRY(local_v6_flush_user_cache_all)
 	/*FALLTHROUGH*/
 
 /*
@@ -88,7 +88,7 @@ ENTRY(v6_flush_user_cache_all)
  *	It is assumed that:
  *	- we have a VIPT cache.
  */
-ENTRY(v6_flush_user_cache_range)
+ENTRY(local_v6_flush_user_cache_range)
 	mov	pc, lr
 
 /*
@@ -104,7 +104,7 @@ ENTRY(v6_flush_user_cache_range)
  *	It is assumed that:
  *	- the Icache does not read data from the write buffer
  */
-ENTRY(v6_coherent_kern_range)
+ENTRY(local_v6_coherent_kern_range)
 	/* FALLTHROUGH */
 
 /*
@@ -120,12 +120,14 @@ ENTRY(v6_coherent_kern_range)
  *	It is assumed that:
  *	- the Icache does not read data from the write buffer
  */
-ENTRY(v6_coherent_user_range)
+ENTRY(local_v6_coherent_user_range)
 
 #ifdef HARVARD_CACHE
 	bic	r0, r0, #CACHE_LINE_SIZE - 1
-1:	mcr	p15, 0, r0, c7, c10, 1		@ clean D line
+1:
+ USER(	mcr	p15, 0, r0, c7, c10, 1	)	@ clean D line
 	add	r0, r0, #CACHE_LINE_SIZE
+2:
 	cmp	r0, r1
 	blo	1b
 #endif
@@ -143,15 +145,26 @@ ENTRY(v6_coherent_user_range)
 	mov	pc, lr
 
 /*
- *	v6_flush_kern_dcache_page(kaddr)
+ * Fault handling for the cache operation above. If the virtual address in r0
+ * isn't mapped, just try the next page.
+ */
+9001:
+	mov	r0, r0, lsr #12
+	mov	r0, r0, lsl #12
+	add	r0, r0, #4096
+	b	2b
+
+/*
+ *	v6_flush_kern_dcache_area(void *addr, size_t size)
  *
  *	Ensure that the data held in the page kaddr is written back
  *	to the page in question.
  *
- *	- kaddr   - kernel address (guaranteed to be page aligned)
+ *	- addr	- kernel address
+ *	- size	- region size
  */
-ENTRY(v6_flush_kern_dcache_page)
-	add	r1, r0, #PAGE_SZ
+ENTRY(local_v6_flush_kern_dcache_area)
+	add	r1, r0, r1
 1:
 #ifdef HARVARD_CACHE
 	mcr	p15, 0, r0, c7, c14, 1		@ clean & invalidate D line
@@ -178,7 +191,7 @@ ENTRY(v6_flush_kern_dcache_page)
  *	- start   - virtual start address of region
  *	- end     - virtual end address of region
  */
-ENTRY(v6_dma_inv_range)
+ENTRY(local_v6_dma_inv_range)
 	tst	r0, #D_CACHE_LINE_SIZE - 1
 	bic	r0, r0, #D_CACHE_LINE_SIZE - 1
 #ifdef HARVARD_CACHE
@@ -211,7 +224,7 @@ ENTRY(v6_dma_inv_range)
  *	- start   - virtual start address of region
  *	- end     - virtual end address of region
  */
-ENTRY(v6_dma_clean_range)
+ENTRY(local_v6_dma_clean_range)
 	bic	r0, r0, #D_CACHE_LINE_SIZE - 1
 1:
 #ifdef HARVARD_CACHE
@@ -231,7 +244,7 @@ ENTRY(v6_dma_clean_range)
  *	- start   - virtual start address of region
  *	- end     - virtual end address of region
  */
-ENTRY(v6_dma_flush_range)
+ENTRY(local_v6_dma_flush_range)
 	bic	r0, r0, #D_CACHE_LINE_SIZE - 1
 1:
 #ifdef HARVARD_CACHE
@@ -245,18 +258,3 @@ ENTRY(v6_dma_flush_range)
 	mov	r0, #0
 	mcr	p15, 0, r0, c7, c10, 4		@ drain write buffer
 	mov	pc, lr
-
-	__INITDATA
-
-	.type	v6_cache_fns, #object
-ENTRY(v6_cache_fns)
-	.long	v6_flush_kern_cache_all
-	.long	v6_flush_user_cache_all
-	.long	v6_flush_user_cache_range
-	.long	v6_coherent_kern_range
-	.long	v6_coherent_user_range
-	.long	v6_flush_kern_dcache_page
-	.long	v6_dma_inv_range
-	.long	v6_dma_clean_range
-	.long	v6_dma_flush_range
-	.size	v6_cache_fns, . - v6_cache_fns
