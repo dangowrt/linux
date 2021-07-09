@@ -21,6 +21,7 @@
 #define PHY_ID_AQR106	0x03a1b4d0
 #define PHY_ID_AQR107	0x03a1b4e0
 #define PHY_ID_AQR112	0x03a1b662
+#define PHY_ID_AQR113	0x31c31c40
 #define PHY_ID_AQCS109	0x03a1b5c2
 #define PHY_ID_AQR405	0x03a1b4b0
 #define PHY_ID_AQR412	0x03a1b712
@@ -765,6 +766,14 @@ static struct phy_driver aqr_driver[] = {
 	.read_status	= aqr_read_status,
 },
 {
+	PHY_ID_MATCH_MODEL(PHY_ID_AQR113),
+	.name		= "Aquantia AQR113",
+	.config_aneg    = aqr_config_aneg,
+	.config_intr	= aqr_config_intr,
+	.handle_interrupt = aqr_handle_interrupt,
+	.read_status	= aqr107_read_status,
+},
+{
 	PHY_ID_MATCH_MODEL(PHY_ID_AQR412),
 	.name		= "Aquantia AQR412",
 	.config_aneg    = aqr_config_aneg_set_prot,
@@ -783,6 +792,7 @@ static struct mdio_device_id __maybe_unused aqr_tbl[] = {
 	{ PHY_ID_MATCH_MODEL(PHY_ID_AQR106) },
 	{ PHY_ID_MATCH_MODEL(PHY_ID_AQR107) },
 	{ PHY_ID_MATCH_MODEL(PHY_ID_AQR112) },
+	{ PHY_ID_MATCH_MODEL(PHY_ID_AQR113) },
 	{ PHY_ID_MATCH_MODEL(PHY_ID_AQCS109) },
 	{ PHY_ID_MATCH_MODEL(PHY_ID_AQR405) },
 	{ PHY_ID_MATCH_MODEL(PHY_ID_AQR412) },
