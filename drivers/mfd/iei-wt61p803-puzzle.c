@@ -176,6 +176,9 @@ static int iei_wt61p803_puzzle_recv_buf(struct serdev_device *serdev,
 	struct iei_wt61p803_puzzle *mcu = serdev_device_get_drvdata(serdev);
 	int ret;
 
+	print_hex_dump_debug("puzzle-mcu rx: ", DUMP_PREFIX_NONE,
+			     16, 1, data, size, false);
+
 	ret = iei_wt61p803_puzzle_process_resp(mcu, data, size);
 	/* Return the number of processed bytes if function returns error,
 	 * discard the remaining incoming data, since the frame this data
@@ -245,6 +248,9 @@ int iei_wt61p803_puzzle_write_command(struct iei_wt61p803_puzzle *mcu,
 	mutex_lock(&mcu->reply_lock);
 
 	cmd[size - 1] = iei_wt61p803_puzzle_checksum(cmd, size - 1);
+
+	print_hex_dump_debug("puzzle-mcu tx: ", DUMP_PREFIX_NONE,
+			     16, 1, cmd, size, false);
 
 	/* Initialize reply struct */
 	reinit_completion(&mcu->reply->received);
