@@ -215,7 +215,6 @@
 	phy-mode = "10gbase-kr";
 	phys = <&cp0_comphy2 0>;
 	phy = <&cp0_nbaset_phy0>;
-	managed = "in-band-status";
 };
 
 &cp0_eth1 {
@@ -223,7 +222,6 @@
 	phy-mode = "2500base-x";
 	phys = <&cp0_comphy4 1>;
 	phy = <&cp0_nbaset_phy1>;
-	managed = "in-band-status";
 };
 
 &cp0_eth2 {
@@ -231,7 +229,6 @@
 	phy-mode = "2500base-x";
 	phys = <&cp0_comphy1 2>;
 	phy = <&cp0_nbaset_phy2>;
-	managed = "in-band-status";
 };
 
 &cp0_gpio1 {
@@ -401,7 +398,6 @@
 	phy-mode = "10gbase-kr";
 	phys = <&cp1_comphy2 0>;
 	phy = <&cp1_nbaset_phy0>;
-	managed = "in-band-status";
 };
 
 &cp1_eth1 {
@@ -409,7 +405,6 @@
 	phy-mode = "2500base-x";
 	phys = <&cp1_comphy4 1>;
 	phy = <&cp1_nbaset_phy1>;
-	managed = "in-band-status";
 };
 
 &cp1_eth2 {
@@ -417,7 +412,6 @@
 	phy-mode = "2500base-x";
 	phys = <&cp1_comphy1 2>;
 	phy = <&cp1_nbaset_phy2>;
-	managed = "in-band-status";
 };
 
 &cp1_gpio1 {
@@ -505,7 +499,6 @@
 	phy-mode = "10gbase-kr";
 	phys = <&cp2_comphy2 0>;
 	phy = <&cp2_nbaset_phy0>;
-	managed = "in-band-status";
 };
 
 &cp2_eth1 {
@@ -513,7 +506,6 @@
 	phy-mode = "2500base-x";
 	phys = <&cp2_comphy4 1>;
 	phy = <&cp2_nbaset_phy1>;
-	managed = "in-band-status";
 };
 
 &cp2_eth2 {
@@ -521,7 +513,6 @@
 	phy-mode = "2500base-x";
 	phys = <&cp2_comphy1 2>;
 	phy = <&cp2_nbaset_phy2>;
-	managed = "in-band-status";
 };
 
 &cp2_gpio1 {
