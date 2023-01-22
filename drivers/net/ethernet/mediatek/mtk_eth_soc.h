@@ -1067,11 +1067,13 @@ struct mtk_soc_data {
  *                     SGMII modes
  * @ana_rgc3:          The offset refers to register ANA_RGC3 related to regmap
  * @pcs:               Phylink PCS structure
+ * @interface:         Currently configured interface mode
  */
 struct mtk_pcs {
 	struct regmap	*regmap;
 	u32             ana_rgc3;
 	struct phylink_pcs pcs;
+	phy_interface_t	interface;
 };
 
 /* struct mtk_sgmii -  This is the structure holding sgmii regmap and its
