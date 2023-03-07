@@ -1016,6 +1016,7 @@ struct mtk_reg_map {
  * @required_pctl		A bool value to show whether the SoC requires
  *				the extra setup for those pins used by GMAC.
  * @hash_offset			Flow table hash offset.
+ * @num_devs			SoC number of macs.
  * @foe_entry_size		Foe table entry size.
  * @has_accounting		Bool indicating support for accounting of
  *				offloaded flows.
@@ -1034,6 +1035,7 @@ struct mtk_soc_data {
 	bool		required_pctl;
 	u8		offload_version;
 	u8		hash_offset;
+	u8		num_devs;
 	u16		foe_entry_size;
 	netdev_features_t hw_features;
 	bool		has_accounting;
@@ -1048,9 +1050,6 @@ struct mtk_soc_data {
 };
 
 #define MTK_DMA_MONITOR_TIMEOUT		msecs_to_jiffies(1000)
-
-/* currently no SoC has more than 2 macs */
-#define MTK_MAX_DEVS			2
 
 /* struct mtk_eth -	This is the main datasructure for holding the state
  *			of the driver
@@ -1106,14 +1105,14 @@ struct mtk_eth {
 	spinlock_t			tx_irq_lock;
 	spinlock_t			rx_irq_lock;
 	struct net_device		dummy_dev;
-	struct net_device		*netdev[MTK_MAX_DEVS];
-	struct mtk_mac			*mac[MTK_MAX_DEVS];
+	struct net_device		**netdev;
+	struct mtk_mac			**mac;
 	int				irq[3];
 	u32				msg_enable;
 	unsigned long			sysclk;
 	struct regmap			*ethsys;
 	struct regmap			*infra;
-	struct phylink_pcs		*sgmii_pcs[MTK_MAX_DEVS];
+	struct phylink_pcs		**sgmii_pcs;
 	struct regmap			*pctl;
 	bool				hwlro;
 	refcount_t			dma_refcnt;
