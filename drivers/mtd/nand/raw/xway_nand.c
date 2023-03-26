@@ -175,7 +175,13 @@ static void xway_cmd_ctrl(struct nand_chip *chip, int cmd, unsigned int ctrl)
 
 static int xway_dev_ready(struct nand_chip *chip)
 {
-	return ltq_ebu_r32(EBU_NAND_WAIT) & NAND_WAIT_RD;
+	/*
+	 * wait until ready, as otherwise the driver will yield in nand_wait or
+	 * nand_wait_ready, which is a bad idea when we're holding ebu_lock
+	 */
+	while ((ltq_ebu_r32(EBU_NAND_WAIT) & NAND_WAIT_RD) == 0)
+		cpu_relax();
+	return 1;
 }
 
 static unsigned char xway_read_byte(struct nand_chip *chip)
