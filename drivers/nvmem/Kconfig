@@ -2,6 +2,7 @@
 menuconfig NVMEM
 	bool "NVMEM Support"
 	imply NVMEM_LAYOUTS
+	select GENERIC_NET_UTILS
 	help
 	  Support for NVMEM(Non Volatile Memory) devices like EEPROM, EFUSES...
 
