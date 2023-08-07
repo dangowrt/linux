@@ -255,6 +255,8 @@ struct bcmgenet_rx_stats64 {
 #define  TBUF_EEE_EN			(1 << 0)
 #define  TBUF_PM_EN			(1 << 1)
 
+#define TBUF_PKT_RDY_THLD		0x10
+
 #define TBUF_CTRL_V1			0x80
 #define TBUF_BP_MC_V1			0xA0
 

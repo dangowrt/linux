@@ -2636,6 +2636,7 @@ static void init_umac(struct bcmgenet_priv *priv)
 	 */
 	reg = 0xf0;
 	bcmgenet_rbuf_writel(priv, reg, RBUF_PKT_RDY_THLD);
+	bcmgenet_writel(reg, priv->base + priv->hw_params->tbuf_offset + TBUF_PKT_RDY_THLD);
 
 	/* enable rx checksumming */
 	reg = bcmgenet_rbuf_readl(priv, RBUF_CHK_CTRL);
