@@ -56,9 +56,10 @@ examples:
             compatible = "linux,ubi";
 
             volumes {
-                ubi-volume-caldata {
+                wifi_caldata: ubi-volume-caldata {
                     volume-id = <2>;
                     volume-name = "rf";
+                    compatible = "nvmem-cells";
                 };
             };
         };
