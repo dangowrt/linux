@@ -25,18 +25,20 @@ struct ascii_env_match_data {
 static int ascii_env_parse_cells(struct device *dev, struct nvmem_device *nvmem, uint8_t *buf,
 				 size_t data_len, const char delim)
 {
-	char *var, *value, *eq, *lf;
+	char *var, *value, *eq, *lf, *cr;
 	char *data = buf;
+	uint incr = 0;
 
 	/*
 	 * Warning the inner loop take care of replacing '\n'
 	 * with '\0', hence we can use strlen on value.
 	 */
 	for (var = data; var < data + data_len && *var;
-	     var = value + strlen(value) + 1) {
+	     var = value + strlen(value) + incr) {
 		struct nvmem_cell_info info = {};
 		struct device_node *child;
 		const char *label;
+		incr = 0;
 
 		eq = strchr(var, delim);
 		if (!eq)
@@ -49,6 +51,15 @@ static int ascii_env_parse_cells(struct device *dev, struct nvmem_device *nvmem,
 		if (!lf)
 			break;
 		*lf = '\0';
+		incr++;
+
+		/* For CRLF based env, replace '\r' with '\0' too to use strlen
+		 * for value, and increment var by one in loop for next variable */
+		cr = strchr(value, '\r');
+		if (cr) {
+			*cr = '\0';
+			incr++;
+		}
 
 		info.name = devm_kstrdup(dev, var, GFP_KERNEL);
 		if (!info.name)
