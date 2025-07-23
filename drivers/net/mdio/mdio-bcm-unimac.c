@@ -37,6 +37,7 @@
 
 struct unimac_mdio_priv {
 	struct mii_bus		*mii_bus;
+	struct device		*dev;
 	void __iomem		*base;
 	int (*wait_func)	(void *wait_func_data);
 	void			*wait_func_data;
@@ -202,8 +203,12 @@ static int unimac_mdio_clk_set(struct unimac_mdio_priv *priv)
 	int ret;
 
 	/* Keep the hardware default values */
-	if (!priv->clk_freq)
+	if (!priv->clk_freq) {
+		dev_dbg(priv->dev, "Keeping default MDIO clock frequency\n");
 		return 0;
+	}
+
+	dev_dbg(priv->dev, "Setting MDIO clock frequency %u\n", priv->clk_freq);
 
 	ret = clk_prepare_enable(priv->clk);
 	if (ret)
@@ -265,6 +270,7 @@ static int unimac_mdio_probe(struct platform_device *pdev)
 	if (of_property_read_u32(np, "clock-frequency", &priv->clk_freq))
 		priv->clk_freq = 0;
 
+	priv->dev = &pdev->dev;
 	priv->mii_bus = mdiobus_alloc();
 	if (!priv->mii_bus)
 		return -ENOMEM;
