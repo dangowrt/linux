@@ -259,6 +259,7 @@
 				label = "lan4";
 				phy-handle = <&switchphy4>;
 				phy-mode = "sgmii";
+				managed = "in-band-status";
 				status = "okay";
 			};
 			port5: port@5 {
@@ -277,19 +278,137 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 			switchphy0: switchphy@0 {
-					reg = <0>;
+				reg = <0>;
+
+				leds {
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					led@0 {
+						reg = <0>;
+						color = <LED_COLOR_ID_ORANGE>;
+						function = LED_FUNCTION_LAN;
+					};
+
+					led@1 {
+						reg = <1>;
+						color = <LED_COLOR_ID_AMBER>;
+						function = LED_FUNCTION_LAN;
+					};
+
+					led@2 {
+						reg = <2>;
+						color = <LED_COLOR_ID_GREEN>;
+						function = LED_FUNCTION_LAN;
+					};
+				};
 			};
+
 			switchphy1: switchphy@1 {
-					reg = <1>;
+				reg = <1>;
+
+				leds {
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					led@0 {
+						reg = <0>;
+						color = <LED_COLOR_ID_ORANGE>;
+						function = LED_FUNCTION_LAN;
+					};
+
+					led@1 {
+						reg = <1>;
+						color = <LED_COLOR_ID_AMBER>;
+						function = LED_FUNCTION_LAN;
+					};
+
+					led@2 {
+						reg = <2>;
+						color = <LED_COLOR_ID_GREEN>;
+						function = LED_FUNCTION_LAN;
+					};
+				};
 			};
+
 			switchphy2: switchphy@2 {
-					reg = <2>;
+				reg = <2>;
+
+				leds {
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					led@0 {
+						reg = <0>;
+						color = <LED_COLOR_ID_ORANGE>;
+						function = LED_FUNCTION_LAN;
+					};
+
+					led@1 {
+						reg = <1>;
+						color = <LED_COLOR_ID_AMBER>;
+						function = LED_FUNCTION_LAN;
+					};
+
+					led@2 {
+						reg = <2>;
+						color = <LED_COLOR_ID_GREEN>;
+						function = LED_FUNCTION_LAN;
+					};
+				};
 			};
 			switchphy3: switchphy@3 {
-					reg = <3>;
+				reg = <3>;
+
+				leds {
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					led@0 {
+						reg = <0>;
+						color = <LED_COLOR_ID_ORANGE>;
+						function = LED_FUNCTION_LAN;
+					};
+
+					led@1 {
+						reg = <1>;
+						color = <LED_COLOR_ID_AMBER>;
+						function = LED_FUNCTION_LAN;
+					};
+
+					led@2 {
+						reg = <2>;
+						color = <LED_COLOR_ID_GREEN>;
+						function = LED_FUNCTION_LAN;
+					};
+				};
 			};
+
 			switchphy4: switchphy@4 {
-					reg = <4>;
+				reg = <4>;
+
+				leds {
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					led@0 {
+						reg = <0>;
+						color = <LED_COLOR_ID_ORANGE>;
+						function = LED_FUNCTION_LAN;
+					};
+
+					led@1 {
+						reg = <1>;
+						color = <LED_COLOR_ID_AMBER>;
+						function = LED_FUNCTION_LAN;
+					};
+
+					led@2 {
+						reg = <2>;
+						color = <LED_COLOR_ID_GREEN>;
+						function = LED_FUNCTION_LAN;
+					};
+				};
 			};
 		};
 	};
