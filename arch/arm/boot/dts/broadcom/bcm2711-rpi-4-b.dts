@@ -204,24 +204,12 @@
 &genet_mdio {
 	clock-frequency = <10000000>;
 
-	switch: switch@0 {
+	switch: switch@1f {
 		compatible = "maxlinear,gsw145";
 		reg = <31>;
-		// ** optional user config start **
-		smdio-badr = /bits/ 8 <31>;
 		rgmii-slew-rx-tx-volt = /bits/ 8 <1>;
 		auto-ldclk-disable = /bits/ 8 <0>;
 		rmii-clk-custom = /bits/ 8 <0>;
-		use-sgmii = /bits/ 8 <1>;
-		sgmii-mode = /bits/ 8 <1>;
-		sgmii-auto-neg = /bits/ 8 <1>;
-		led-settings = /bits/ 8 <1>;
-		led0h-settings = /bits/ 8 <0x40>;
-		led0l-settings = /bits/ 8 <0xb>;
-		led1h-settings = /bits/ 8 <0x30>;
-		led1l-settings = /bits/ 8 <0xb>;
-		led2h-settings = /bits/ 8 <0x40>;
-		led2l-settings = /bits/ 8 <0>;
 		// ** optional user config end **
 		ports {
 			#address-cells = <1>;
@@ -259,7 +247,6 @@
 				label = "lan4";
 				phy-handle = <&switchphy4>;
 				phy-mode = "sgmii";
-				managed = "in-band-status";
 				status = "okay";
 			};
 			port5: port@5 {
