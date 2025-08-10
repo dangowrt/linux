@@ -620,8 +620,8 @@ static int jffs2_rmdir (struct inode *dir_i, struct dentry *dentry)
 	return ret;
 }
 
-static int jffs2_mknod (struct mnt_idmap *idmap, struct inode *dir_i,
-		        struct dentry *dentry, umode_t mode, dev_t rdev)
+static int __jffs2_mknod (struct mnt_idmap *idmap, struct inode *dir_i,
+		          struct dentry *dentry, umode_t mode, dev_t rdev, bool whiteout)
 {
 	struct jffs2_inode_info *f, *dir_f;
 	struct jffs2_sb_info *c;
@@ -761,12 +761,29 @@ static int jffs2_mknod (struct mnt_idmap *idmap, struct inode *dir_i,
 	mutex_unlock(&dir_f->sem);
 	jffs2_complete_reservation(c);
 
-	d_instantiate_new(dentry, inode);
+	if (!whiteout)
+		d_instantiate_new(dentry, inode);
+	else
+		unlock_new_inode(inode);
+
 	return 0;
 
  fail:
 	iget_failed(inode);
 	return ret;
+}
+
+static int jffs2_mknod (struct mnt_idmap *idmap, struct inode *dir_i,
+			struct dentry *dentry, umode_t mode, dev_t rdev)
+{
+	return __jffs2_mknod(idmap, dir_i, dentry, mode, rdev, false);
+}
+
+static int jffs2_whiteout (struct mnt_idmap *idmap, struct inode *old_dir,
+			   struct dentry *old_dentry)
+{
+	return __jffs2_mknod(idmap, old_dir, old_dentry, S_IFCHR | WHITEOUT_MODE,
+			     WHITEOUT_DEV, true);
 }
 
 static int jffs2_rename (struct mnt_idmap *idmap,
@@ -780,7 +797,7 @@ static int jffs2_rename (struct mnt_idmap *idmap,
 	uint8_t type;
 	uint32_t now;
 
-	if (flags & ~RENAME_NOREPLACE)
+	if (flags & ~(RENAME_NOREPLACE|RENAME_WHITEOUT))
 		return -EINVAL;
 
 	/* The VFS will check for us and prevent trying to rename a
@@ -846,9 +863,14 @@ static int jffs2_rename (struct mnt_idmap *idmap,
 	if (d_is_dir(old_dentry) && !victim_f)
 		inc_nlink(new_dir_i);
 
-	/* Unlink the original */
-	ret = jffs2_do_unlink(c, JFFS2_INODE_INFO(old_dir_i),
-			      old_dentry->d_name.name, old_dentry->d_name.len, NULL, now);
+	if (flags & RENAME_WHITEOUT)
+		/* Replace with whiteout */
+		ret = jffs2_whiteout(idmap, old_dir_i, old_dentry);
+	else
+		/* Unlink the original */
+		ret = jffs2_do_unlink(c, JFFS2_INODE_INFO(old_dir_i),
+				      old_dentry->d_name.name,
+				      old_dentry->d_name.len, NULL, now);
 
 	/* We don't touch inode->i_nlink */
 
