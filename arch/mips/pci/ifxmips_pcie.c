@@ -1139,12 +1139,12 @@ static int ifx_pcie_bios_probe(struct platform_device *pdev)
 
     pcie_reset_gpio = of_get_named_gpio(node, "gpio-reset", 0);
     if (gpio_is_valid(pcie_reset_gpio)) {
-        int ret = devm_gpio_request(&pdev->dev, pcie_reset_gpio, "pcie-reset");
+        int ret = devm_gpio_request_one(&pdev->dev, pcie_reset_gpio,
+                                        GPIOF_OUT_INIT_HIGH, "pcie-reset");
         if (ret) {
             dev_err(&pdev->dev, "failed to request gpio %d\n", pcie_reset_gpio);
             return ret;
         }
-        gpio_direction_output(pcie_reset_gpio, 1);
     }
 
     for (pcie_port = startup_port; pcie_port < IFX_PCIE_CORE_NR; pcie_port++){
