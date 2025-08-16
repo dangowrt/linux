@@ -253,6 +253,8 @@
 				reg = <5>;
 				label = "cpu";
 				phy-mode = "rgmii-id";
+				tx-internal-delay-ps = <2000>;
+				rx-internal-delay-ps = <2000>;
 				ethernet = <&genet>;
 				fixed-link {
 					speed = <1000>;
