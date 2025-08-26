@@ -111,20 +111,6 @@ static const struct gswip_rmon_cnt_desc gswip_rmon_cnt[] = {
 	MIB_DESC(2, 0x0E, "TxGoodBytes"),
 };
 
-static u32 gswip_switch_r(struct gswip_priv *priv, u32 offset)
-{
-	unsigned int val;
-	int ret;
-
-	ret = regmap_read(priv->gswip, offset, &val);
-	if (WARN_ON_ONCE(ret)) {
-		dev_err(priv->dev, "failed to read switch register\n");
-		return 0;
-	}
-
-	return val;
-}
-
 static void gswip_switch_mask(struct gswip_priv *priv, u32 clear, u32 set,
 			      u32 offset)
 {
@@ -142,20 +128,6 @@ static u32 gswip_switch_r_timeout(struct gswip_priv *priv, u32 offset,
 
 	return regmap_read_poll_timeout(priv->gswip, offset, val,
 					!(val & cleared), 20, 50000);
-}
-
-static u32 gswip_mdio_r(struct gswip_priv *priv, u32 offset)
-{
-	u32 val;
-	int ret;
-
-	ret = regmap_read(priv->mdio, offset, &val);
-	if (WARN_ON_ONCE(ret)) {
-		dev_err(priv->dev, "failed to read mdio register\n");
-		return 0;
-	}
-
-	return val;
 }
 
 static void gswip_mdio_mask(struct gswip_priv *priv, u32 clear, u32 set,
@@ -247,6 +219,7 @@ static int gswip_mdio_wr(struct mii_bus *bus, int addr, int reg, u16 val)
 static int gswip_mdio_rd(struct mii_bus *bus, int addr, int reg)
 {
 	struct gswip_priv *priv = bus->priv;
+	u32 val;
 	int err;
 
 	err = gswip_mdio_poll(priv);
@@ -266,7 +239,11 @@ static int gswip_mdio_rd(struct mii_bus *bus, int addr, int reg)
 		return err;
 	}
 
-	return gswip_mdio_r(priv, GSWIP_MDIO_READ);
+	err = regmap_read(priv->mdio, GSWIP_MDIO_READ, &val);
+	if (err)
+		return err;
+
+	return val;
 }
 
 static int gswip_mdio(struct gswip_priv *priv)
@@ -310,6 +287,7 @@ static int gswip_pce_table_entry_read(struct gswip_priv *priv,
 	int i;
 	int err;
 	u16 crtl;
+	u32 tmp;
 	u16 addr_mode = tbl->key_mode ? GSWIP_PCE_TBL_CTRL_OPMOD_KSRD :
 					GSWIP_PCE_TBL_CTRL_OPMOD_ADRD;
 
@@ -335,16 +313,29 @@ static int gswip_pce_table_entry_read(struct gswip_priv *priv,
 		return err;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(tbl->key); i++)
-		tbl->key[i] = gswip_switch_r(priv, GSWIP_PCE_TBL_KEY(i));
+	for (i = 0; i < ARRAY_SIZE(tbl->key); i++) {
+		err = regmap_read(priv->gswip, GSWIP_PCE_TBL_KEY(i), &tmp);
+		if (err)
+			return err;
+		tbl->key[i] = tmp;
+	}
+	for (i = 0; i < ARRAY_SIZE(tbl->val); i++) {
+		err = regmap_read(priv->gswip, GSWIP_PCE_TBL_VAL(i), &tmp);
+		if (err)
+			return err;
+		tbl->val[i] = tmp;
+	}
 
-	for (i = 0; i < ARRAY_SIZE(tbl->val); i++)
-		tbl->val[i] = gswip_switch_r(priv, GSWIP_PCE_TBL_VAL(i));
+	err = regmap_read(priv->gswip, GSWIP_PCE_TBL_MASK, &tmp);
+	if (err)
+		return err;
 
-	tbl->mask = gswip_switch_r(priv, GSWIP_PCE_TBL_MASK);
+	tbl->mask = tmp;
+	err = regmap_read(priv->gswip, GSWIP_PCE_TBL_CTRL, &tmp);
+	if (err)
+		return err;
 
-	crtl = gswip_switch_r(priv, GSWIP_PCE_TBL_CTRL);
-
+	crtl = tmp;
 	tbl->type = !!(crtl & GSWIP_PCE_TBL_CTRL_TYPE);
 	tbl->valid = !!(crtl & GSWIP_PCE_TBL_CTRL_VLD);
 	tbl->gmap = (crtl & GSWIP_PCE_TBL_CTRL_GMAP_MASK) >> 7;
@@ -360,6 +351,7 @@ static int gswip_pce_table_entry_write(struct gswip_priv *priv,
 	int i;
 	int err;
 	u16 crtl;
+	u32 tmp;
 	u16 addr_mode = tbl->key_mode ? GSWIP_PCE_TBL_CTRL_OPMOD_KSWR :
 					GSWIP_PCE_TBL_CTRL_OPMOD_ADWR;
 
@@ -391,9 +383,9 @@ static int gswip_pce_table_entry_write(struct gswip_priv *priv,
 
 	regmap_write(priv->gswip, GSWIP_PCE_TBL_MASK, tbl->mask);
 
-	crtl = gswip_switch_r(priv, GSWIP_PCE_TBL_CTRL);
-	crtl &= ~(GSWIP_PCE_TBL_CTRL_TYPE | GSWIP_PCE_TBL_CTRL_VLD |
-		  GSWIP_PCE_TBL_CTRL_GMAP_MASK);
+	regmap_read(priv->gswip, GSWIP_PCE_TBL_CTRL, &tmp);
+	crtl = tmp & ~(GSWIP_PCE_TBL_CTRL_TYPE | GSWIP_PCE_TBL_CTRL_VLD |
+		       GSWIP_PCE_TBL_CTRL_GMAP_MASK);
 	if (tbl->type)
 		crtl |= GSWIP_PCE_TBL_CTRL_TYPE;
 	if (tbl->valid)
@@ -1543,7 +1535,7 @@ static void gswip_get_strings(struct dsa_switch *ds, int port, u32 stringset,
 static u32 gswip_bcm_ram_entry_read(struct gswip_priv *priv, u32 table,
 				    u32 index)
 {
-	u32 result;
+	u32 result, val;
 	int err;
 
 	regmap_write(priv->gswip, GSWIP_BM_RAM_ADDR, index);
@@ -1561,7 +1553,8 @@ static u32 gswip_bcm_ram_entry_read(struct gswip_priv *priv, u32 table,
 	}
 
 	regmap_read(priv->gswip, GSWIP_BM_RAM_VAL(0), &result);
-	result |= gswip_switch_r(priv, GSWIP_BM_RAM_VAL(1)) << 16;
+	regmap_read(priv->gswip, GSWIP_BM_RAM_VAL(1), &val);
+	result |= val << 16;
 
 	return result;
 }
