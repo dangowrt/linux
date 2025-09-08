@@ -205,12 +205,9 @@
 	clock-frequency = <10000000>;
 
 	switch: switch@1f {
-		compatible = "maxlinear,gsw145";
 		reg = <31>;
-		rgmii-slew-rx-tx-volt = /bits/ 8 <1>;
-		auto-ldclk-disable = /bits/ 8 <0>;
-		rmii-clk-custom = /bits/ 8 <0>;
-		// ** optional user config end **
+		compatible = "maxlinear,gsw145";
+
 		ports {
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -251,10 +248,11 @@
 			};
 			port5: port@5 {
 				reg = <5>;
-				label = "cpu";
+
 				phy-mode = "rgmii-id";
 				tx-internal-delay-ps = <2000>;
 				rx-internal-delay-ps = <2000>;
+				// maxlinear,rmii-refclk-out;
 				ethernet = <&genet>;
 				fixed-link {
 					speed = <1000>;
