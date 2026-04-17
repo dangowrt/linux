@@ -1556,6 +1556,48 @@ mt7530_port_bridge_join(struct dsa_switch *ds, int port,
 	return 0;
 }
 
+static int
+mt7530_vlan_cmd(struct mt7530_priv *priv, enum mt7530_vlan_cmd cmd, u16 vid)
+{
+	struct mt7530_dummy_poll p;
+	u32 val;
+	int ret;
+
+	val = VTCR_BUSY | VTCR_FUNC(cmd) | VTCR_VID(vid);
+	regmap_write(priv->regmap, MT7530_VTCR, val);
+
+	INIT_MT7530_DUMMY_POLL(&p, priv, MT7530_VTCR);
+	ret = readx_poll_timeout(mt7530_mii_poll, &p, val,
+				 !(val & VTCR_BUSY), 20, 20000);
+	if (ret < 0) {
+		dev_err(priv->dev, "poll timeout\n");
+		return ret;
+	}
+
+	regmap_read(priv->regmap, MT7530_VTCR, &val);
+	if (val & VTCR_INVALID) {
+		dev_err(priv->dev, "read VTCR invalid\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int
+mt7530_setup_vlan0(struct mt7530_priv *priv)
+{
+	u32 val;
+
+	/* Validate the entry with independent learning, keep the original
+	 * ingress tag attribute.
+	 */
+	val = IVL_MAC | EG_CON | PORT_MEM(MT7530_ALL_MEMBERS) | FID(FID_BRIDGED) |
+	      VLAN_VALID;
+	regmap_write(priv->regmap, MT7530_VAWD1, val);
+
+	return mt7530_vlan_cmd(priv, MT7530_VTCR_WR_VID, 0);
+}
+
 static void
 mt7530_port_set_vlan_unaware(struct dsa_switch *ds, int port)
 {
@@ -1580,6 +1622,8 @@ mt7530_port_set_vlan_unaware(struct dsa_switch *ds, int port)
 			   G0_PORT_VID_MASK, G0_PORT_VID_DEF);
 
 	for (i = 0; i < priv->ds->num_ports; i++) {
+		if (i == port)
+			continue;
 		if (dsa_is_user_port(ds, i) &&
 		    dsa_port_is_vlan_filtering(dsa_to_port(ds, i))) {
 			all_user_ports_removed = false;
@@ -1590,15 +1634,8 @@ mt7530_port_set_vlan_unaware(struct dsa_switch *ds, int port)
 	/* CPU port also does the same thing until all user ports belonging to
 	 * the CPU port get out of VLAN filtering mode.
 	 */
-	if (all_user_ports_removed) {
-		struct dsa_port *dp = dsa_to_port(ds, port);
-		struct dsa_port *cpu_dp = dp->cpu_dp;
-
-		regmap_write(priv->regmap, MT7530_PCR_P(cpu_dp->index),
-			     PCR_MATRIX(dsa_user_ports(priv->ds)));
-		regmap_write(priv->regmap, MT7530_PVC_P(cpu_dp->index),
-			     PORT_SPEC_TAG | PVC_EG_TAG(MT7530_VLAN_EG_CONSISTENT));
-	}
+	if (all_user_ports_removed)
+		mt7530_setup_vlan0(priv);
 }
 
 static void
@@ -1793,33 +1830,6 @@ mt7530_port_mdb_del(struct dsa_switch *ds, int port,
 }
 
 static int
-mt7530_vlan_cmd(struct mt7530_priv *priv, enum mt7530_vlan_cmd cmd, u16 vid)
-{
-	struct mt7530_dummy_poll p;
-	u32 val;
-	int ret;
-
-	val = VTCR_BUSY | VTCR_FUNC(cmd) | VTCR_VID(vid);
-	regmap_write(priv->regmap, MT7530_VTCR, val);
-
-	INIT_MT7530_DUMMY_POLL(&p, priv, MT7530_VTCR);
-	ret = readx_poll_timeout(mt7530_mii_poll, &p, val,
-				 !(val & VTCR_BUSY), 20, 20000);
-	if (ret < 0) {
-		dev_err(priv->dev, "poll timeout\n");
-		return ret;
-	}
-
-	regmap_read(priv->regmap, MT7530_VTCR, &val);
-	if (val & VTCR_INVALID) {
-		dev_err(priv->dev, "read VTCR invalid\n");
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int
 mt7530_port_vlan_filtering(struct dsa_switch *ds, int port, bool vlan_filtering,
 			   struct netlink_ext_ack *extack)
 {
@@ -1921,21 +1931,6 @@ mt7530_hw_vlan_update(struct mt7530_priv *priv, u16 vid,
 
 	/* Flush result to hardware */
 	mt7530_vlan_cmd(priv, MT7530_VTCR_WR_VID, vid);
-}
-
-static int
-mt7530_setup_vlan0(struct mt7530_priv *priv)
-{
-	u32 val;
-
-	/* Validate the entry with independent learning, keep the original
-	 * ingress tag attribute.
-	 */
-	val = IVL_MAC | EG_CON | PORT_MEM(MT7530_ALL_MEMBERS) | FID(FID_BRIDGED) |
-	      VLAN_VALID;
-	regmap_write(priv->regmap, MT7530_VAWD1, val);
-
-	return mt7530_vlan_cmd(priv, MT7530_VTCR_WR_VID, 0);
 }
 
 static int
